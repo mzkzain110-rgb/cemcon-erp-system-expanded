@@ -89,6 +89,37 @@ interface SessionData {
   };
 }
 
+async function safeExtractError(res: Response, fallback = 'Operation failed'): Promise<string> {
+  try {
+    const text = await res.text();
+    if (!text) return `${fallback} (Status ${res.status})`;
+    try {
+      const data = JSON.parse(text);
+      return data.error || data.message || `${fallback}: ${text.slice(0, 120)}`;
+    } catch {
+      return `${fallback} (Status ${res.status}): ${text.slice(0, 120)}`;
+    }
+  } catch {
+    return `${fallback} (Status ${res.status})`;
+  }
+}
+
+async function safeFetchJson<T = any>(url: string, init?: RequestInit): Promise<T | null> {
+  try {
+    const res = await fetch(url, init);
+    if (!res.ok) {
+      console.warn(`Request to ${url} returned status ${res.status}`);
+      return null;
+    }
+    const text = await res.text();
+    if (!text) return null;
+    return JSON.parse(text) as T;
+  } catch (err) {
+    console.error(`Error fetching ${url}:`, err);
+    return null;
+  }
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<
     'overview' | 'departments' | 'jobs' | 'estimations' | 'accounting' | 'procurement' | 'inventory' | 'approvals' | 'sheets' | 'tests' | 'migration'
@@ -192,9 +223,8 @@ export default function App() {
 
   const fetchSession = async () => {
     try {
-      const res = await fetch('/api/auth/session');
-      if (res.ok) {
-        const data = await res.json();
+      const data = await safeFetchJson<SessionData>('/api/auth/session');
+      if (data) {
         setSession(data);
       }
     } catch (err) {
@@ -254,46 +284,45 @@ export default function App() {
     if (!session?.company?.company_id) return;
 
     // Background load reminders for bell badge
-    fetch('/api/reminders/scan')
-      .then((r) => r.json())
-      .then((data) => setReminders(data || []))
+    safeFetchJson<any[]>('/api/reminders/scan').then((data) => setReminders(data || []));
+
     if (activeTab === 'overview' || activeTab === 'departments') {
-      fetch('/api/departments').then((r) => r.json()).then((d) => setDepartments(d.data || [])).catch(console.error);
-      fetch('/api/employees').then((r) => r.json()).then((d) => setEmployees(d.data || [])).catch(console.error);
+      safeFetchJson<{ data: any[] }>('/api/departments').then((d) => setDepartments(d?.data || []));
+      safeFetchJson<{ data: any[] }>('/api/employees').then((d) => setEmployees(d?.data || []));
     }
 
     if (activeTab === 'overview' || activeTab === 'jobs') {
-      fetch('/api/jobs').then((r) => r.json()).then((d) => setJobs(d.data || []));
-      fetch('/api/customers').then((r) => r.json()).then((d) => setCustomers(d.data || []));
+      safeFetchJson<{ data: any[] }>('/api/jobs').then((d) => setJobs(d?.data || []));
+      safeFetchJson<{ data: any[] }>('/api/customers').then((d) => setCustomers(d?.data || []));
     }
 
     if (activeTab === 'overview' || activeTab === 'accounting') {
-      fetch('/api/accounting/accounts').then((r) => r.json()).then((d) => setAccounts(d.data || []));
-      fetch('/api/accounting/journals').then((r) => r.json()).then((d) => setJournals(d.data || []));
-      fetch('/api/accounting/trial-balance').then((r) => r.json()).then((d) => setTrialBalance(d));
+      safeFetchJson<{ data: any[] }>('/api/accounting/accounts').then((d) => setAccounts(d?.data || []));
+      safeFetchJson<{ data: any[] }>('/api/accounting/journals').then((d) => setJournals(d?.data || []));
+      safeFetchJson<any>('/api/accounting/trial-balance').then((d) => setTrialBalance(d));
     }
 
     if (activeTab === 'overview' || activeTab === 'inventory') {
-      fetch('/api/inventory/items').then((r) => r.json()).then((d) => setItems(d.data || []));
-      fetch('/api/inventory/warehouses').then((r) => r.json()).then((d) => setWarehouses(d.data || []));
-      fetch('/api/inventory/stock-balances').then((r) => r.json()).then((d) => setStockBalances(d || []));
-      fetch('/api/inventory/transactions').then((r) => r.json()).then((d) => setInvTransactions(d.data || []));
+      safeFetchJson<{ data: any[] }>('/api/inventory/items').then((d) => setItems(d?.data || []));
+      safeFetchJson<{ data: any[] }>('/api/inventory/warehouses').then((d) => setWarehouses(d?.data || []));
+      safeFetchJson<any[]>('/api/inventory/stock-balances').then((d) => setStockBalances(d || []));
+      safeFetchJson<{ data: any[] }>('/api/inventory/transactions').then((d) => setInvTransactions(d?.data || []));
     }
 
     if (activeTab === 'overview' || activeTab === 'approvals') {
-      fetch('/api/approvals/pending').then((r) => r.json()).then((d) => setPendingApprovals(d.data || []));
-      fetch('/api/audit-logs').then((r) => r.json()).then((d) => setAuditLogs(d.data || []));
+      safeFetchJson<{ data: any[] }>('/api/approvals/pending').then((d) => setPendingApprovals(d?.data || []));
+      safeFetchJson<{ data: any[] }>('/api/audit-logs').then((d) => setAuditLogs(d?.data || []));
     }
 
     if (activeTab === 'sheets' || activeTab === 'overview') {
-      fetch('/api/sheets/tabs').then((r) => r.json()).then((d) => setSheetsTabs(d || []));
-      fetch('/api/sheets/service-account').then((r) => r.json()).then((d) => setServiceAccountInfo(d)).catch(console.error);
+      safeFetchJson<string[]>('/api/sheets/tabs').then((d) => setSheetsTabs(d || []));
+      safeFetchJson<any>('/api/sheets/service-account').then((d) => setServiceAccountInfo(d));
       loadSheetTab(selectedSheetTab);
     }
 
     if (activeTab === 'migration') {
-      fetch('/api/migration/ddl').then((r) => r.text()).then((d) => setPostgresDDL(d));
-      fetch('/api/migration/reconciliation').then((r) => r.json()).then((d) => setReconciliationReport(d));
+      fetch('/api/migration/ddl').then((r) => r.text()).then((d) => setPostgresDDL(d)).catch(console.error);
+      safeFetchJson<any>('/api/migration/reconciliation').then((d) => setReconciliationReport(d));
     }
   }, [activeTab, session?.company?.company_id, refreshTrigger, selectedSheetTab]);
 
@@ -460,8 +489,8 @@ export default function App() {
         ]);
         setRefreshTrigger((prev) => prev + 1);
       } else {
-        const err = await res.json();
-        setJournalError(err.error || 'Failed to post journal');
+        const errMsg = await safeExtractError(res, 'Failed to post journal');
+        setJournalError(errMsg);
       }
     } catch (err: any) {
       setJournalError(err.message);
@@ -585,8 +614,8 @@ export default function App() {
         setNewDeptCode('');
         setRefreshTrigger((prev) => prev + 1);
       } else {
-        const err = await res.json();
-        alert(`Department Error: ${err.error}`);
+        const errMsg = await safeExtractError(res, 'Failed to create department');
+        alert(`Department Error: ${errMsg}`);
       }
     } catch (err: any) {
       alert(`Error creating department: ${err.message}`);
@@ -621,8 +650,8 @@ export default function App() {
         setNewEmpPhone('');
         setRefreshTrigger((prev) => prev + 1);
       } else {
-        const err = await res.json();
-        alert(`Employee Error: ${err.error}`);
+        const errMsg = await safeExtractError(res, 'Failed to create employee');
+        alert(`Employee Error: ${errMsg}`);
       }
     } catch (err: any) {
       alert(`Error creating employee: ${err.message}`);

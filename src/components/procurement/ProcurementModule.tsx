@@ -296,7 +296,7 @@ export const ProcurementModule: React.FC<ProcurementModuleProps> = ({
           vehicle_number: newGrnVehicle,
           total_value: newGrnValue,
           mtc_number: newGrnMtc,
-          inspected_by: 'Dr. Robert Vance, CEng (QA/QC Lead)',
+          inspected_by: 'QA/QC Inspector',
           items: [
             { itemCode: 'STL-PLATE-S355', description: 'Consignment structural steel items', qty: 1, uom: 'LOT', totalCost: newGrnValue },
           ],

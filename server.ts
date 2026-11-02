@@ -43,6 +43,17 @@ const port = 3000;
 
 app.use(express.json());
 
+// Normalization middleware for Vercel serverless rewrites
+app.use((req, _res, next) => {
+  const matched = (req.headers['x-matched-path'] || req.headers['x-forwarded-uri']) as string;
+  if (matched && matched.startsWith('/api')) {
+    const queryIndex = req.url.indexOf('?');
+    const queryString = queryIndex !== -1 ? req.url.slice(queryIndex) : '';
+    req.url = matched.includes('?') ? matched : `${matched}${queryString}`;
+  }
+  next();
+});
+
 // Initialize Database Storage
 await globalStorageAdapter.init();
 
@@ -1758,20 +1769,25 @@ app.post('/api/diagnostics/run-tests', async (_req: Request, res: Response) => {
   });
 });
 
-// Mount Vite or Static Files
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.resolve(__dirname, 'dist')));
-  app.get('*', (_req: Request, res: Response) => {
-    res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+// Mount Vite or Static Files (Skip when executing as a Vercel Serverless Function)
+if (!process.env.VERCEL) {
+  if (process.env.NODE_ENV === 'production') {
+    app.use(express.static(path.resolve(__dirname, 'dist')));
+    app.get('*', (_req: Request, res: Response) => {
+      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+    });
+  } else {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  }
+
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`[Compenia ERP] Google Sheets Database Server listening at http://0.0.0.0:${port}`);
   });
-} else {
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: 'spa',
-  });
-  app.use(vite.middlewares);
 }
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(`[Compenia ERP] Google Sheets Database Server listening at http://0.0.0.0:${port}`);
-});
+export default app;
+export { app };

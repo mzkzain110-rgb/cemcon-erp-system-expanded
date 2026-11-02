@@ -152,19 +152,19 @@ export const HRPrintableForms: React.FC<HRPrintableFormsProps> = ({
       companyCode: 'CEMCON-MECH',
       refNo: 'CEM-PI-2026-018',
       date: '2026-04-12',
-      candidateName: 'Bilal Mansoor',
+      candidateName: 'Candidate Name',
       positionApplied: 'Senior Welder 6G (TIG/MIG)',
-      phone: '+971-50-881-2299',
-      email: 'bilal.weld@gmail.com',
-      nationality: 'Pakistani',
+      phone: '+971-50-000-0000',
+      email: 'candidate@example.com',
+      nationality: 'International',
       dob: '1992-06-14',
       visaStatus: 'Employment Visa (Transferable with NOC)',
       visaExpiry: '2026-08-30',
-      currentEmployer: 'Gulf Piping Technologies LLC',
+      currentEmployer: 'Fabrication Engineering Services',
       currentSalary: 'AED 4,200',
       expectedSalary: 'AED 4,800',
       noticePeriod: '15 Days',
-      highestQualification: 'Diploma in Mechanical Engineering & AWS Certification',
+      highestQualification: 'Diploma in Mechanical Engineering & Welding Certification',
     },
   ]);
   const [selectedPreInterviewIndex, setSelectedPreInterviewIndex] = useState(0);
@@ -175,9 +175,9 @@ export const HRPrintableForms: React.FC<HRPrintableFormsProps> = ({
       companyCode: 'CEMCON-MECH',
       refNo: 'CEM-IE-2026-009',
       date: '2026-04-14',
-      candidateName: 'Bilal Mansoor',
+      candidateName: 'Candidate Name',
       position: 'Senior Welder 6G (TIG/MIG)',
-      interviewer: 'Dr. Robert Vance, CEng (QA/QC Manager)',
+      interviewer: 'QA/QC Manager',
       technicalRating: '9 / 10',
       experienceRating: '9 / 10',
       communicationRating: '8 / 10',
@@ -200,15 +200,15 @@ export const HRPrintableForms: React.FC<HRPrintableFormsProps> = ({
       refNo: 'CEM-JF-2026-031',
       joiningDate: '2026-05-01',
       empNo: 'EMP-1011',
-      fullName: 'Bilal Mansoor',
+      fullName: 'Personnel Name',
       designation: 'Senior Welder 6G',
       department: 'Production/Workshop',
-      reportingTo: 'Muhammad Faisal (Project Engineer / Superintendent)',
-      passportNo: 'PK9902188',
-      emiratesId: '784-1992-1928374-1',
-      bankName: 'Emirates NBD',
-      iban: 'AE290260001099283746192',
-      emergencyContact: 'Tariq Shehzad (Brother) - +971-55-901-2234',
+      reportingTo: 'Workshop Superintendent',
+      passportNo: 'A0000000',
+      emiratesId: '784-0000-0000000-1',
+      bankName: 'Commercial Bank',
+      iban: 'AE000000000000000000000',
+      emergencyContact: 'Next of Kin - +971-55-000-0000',
       safetyInductionDate: '2026-05-01',
       ppeIssued: 'Welding Helmet, Leather Apron, Steel-toe Boots (Cat 4), Safety Harness',
     },
@@ -222,16 +222,16 @@ export const HRPrintableForms: React.FC<HRPrintableFormsProps> = ({
       refNo: 'CEM-LV-2026-087',
       applicationDate: '2026-04-16',
       empNo: 'EMP-1004',
-      empName: 'Qaiser Shehzad',
-      designation: 'Managing Director & System Administrator',
+      empName: 'Senior Engineer',
+      designation: 'Project Lead',
       department: 'Design & Estimation',
       leaveType: 'Annual Vacation',
       startDate: '2026-06-15',
       endDate: '2026-07-14',
       totalDays: '30 Calendar Days',
-      contactAddress: 'Dubai Marina, Tower B, Apt 1402',
-      emergencyPhone: '+971-50-992-0199',
-      relieverName: 'Mohsin Afridi (Finance & Accounts Controller)',
+      contactAddress: 'Dubai, UAE',
+      emergencyPhone: '+971-50-000-0000',
+      relieverName: 'Finance Controller',
       reason: 'Annual statutory leave as per UAE Federal Decree-Law No. 33 of 2021.',
     },
   ]);
@@ -245,7 +245,7 @@ export const HRPrintableForms: React.FC<HRPrintableFormsProps> = ({
       resignationDate: '2026-02-15',
       lastWorkingDate: '2026-03-31',
       empNo: 'EMP-0994',
-      empName: 'Farooq Qasim',
+      empName: 'Logistics Officer',
       designation: 'Assistant Warehouse Storekeeper',
       department: 'Store & Logistics',
       itStatus: 'CLEARED (ERP account revoked, email archived)',
@@ -1667,7 +1667,7 @@ export const HRPrintableForms: React.FC<HRPrintableFormsProps> = ({
                         required
                         value={newLeaveEmpName}
                         onChange={(e) => setNewLeaveEmpName(e.target.value)}
-                        placeholder="e.g. Qaiser Shehzad"
+                        placeholder="e.g. Employee Full Name"
                         className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2"
                       />
                     </div>
@@ -1757,7 +1757,7 @@ export const HRPrintableForms: React.FC<HRPrintableFormsProps> = ({
                         required
                         value={newLeaveReliever}
                         onChange={(e) => setNewLeaveReliever(e.target.value)}
-                        placeholder="e.g. Mohsin Afridi"
+                        placeholder="e.g. Reliever Name"
                         className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2"
                       />
                     </div>
@@ -1811,7 +1811,7 @@ export const HRPrintableForms: React.FC<HRPrintableFormsProps> = ({
                         required
                         value={newPiCandidate}
                         onChange={(e) => setNewPiCandidate(e.target.value)}
-                        placeholder="e.g. Chen Wei / Bilal Mansoor"
+                        placeholder="e.g. Candidate Full Name"
                         className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2"
                       />
                     </div>
@@ -2055,7 +2055,7 @@ export const HRPrintableForms: React.FC<HRPrintableFormsProps> = ({
                         required
                         value={newEvalCandidate}
                         onChange={(e) => setNewEvalCandidate(e.target.value)}
-                        placeholder="e.g. Bilal Mansoor"
+                        placeholder="e.g. Candidate Full Name"
                         className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2"
                       />
                     </div>
@@ -2080,7 +2080,7 @@ export const HRPrintableForms: React.FC<HRPrintableFormsProps> = ({
                         required
                         value={newEvalInterviewer}
                         onChange={(e) => setNewEvalInterviewer(e.target.value)}
-                        placeholder="e.g. Dr. Robert Vance, CEng"
+                        placeholder="e.g. Lead Technical Interviewer"
                         className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2"
                       />
                     </div>
