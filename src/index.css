@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@media print {
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* Hide app chrome during printing */
+  aside,
+  header,
+  nav,
+  .no-print,
+  button {
+    display: none !important;
+  }
+
+  /* Reset any overflow clipping from parent wrappers */
+  div {
+    overflow: visible !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .print-container {
+    padding: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    background: #ffffff !important;
+    color: #111827 !important;
+    page-break-inside: auto;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+}

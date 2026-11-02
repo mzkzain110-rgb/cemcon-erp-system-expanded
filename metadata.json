@@ -1,0 +1,6 @@
+{
+  "name": "Compenia ERP - Google Sheets Database Engine",
+  "description": "Multi-tenant enterprise resource planning system with Google Sheets database adapter, strict role-based access control, balanced double-entry accounting, and concurrency-safe job sequences.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
