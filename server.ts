@@ -8,7 +8,6 @@ import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { createServer as createViteServer } from 'vite';
 import { globalStorageAdapter, SecurityContext } from './src/server/storage/storageAdapter.js';
 import { googleSheetsClient } from './src/server/storage/googleSheetsClient.js';
 import {
@@ -1777,7 +1776,8 @@ if (!process.env.VERCEL) {
       res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
     });
   } else {
-    const vite = await createViteServer({
+    const { createServer } = await import('vite');
+    const vite = await createServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
