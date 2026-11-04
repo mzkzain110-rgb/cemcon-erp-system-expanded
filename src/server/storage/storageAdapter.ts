@@ -324,13 +324,15 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
 
     sheet.rows.push(rowToSave);
 
-    // Asynchronously replicate write to live Google Sheets API if service account is active
+    // Synchronously replicate write to live Google Sheets API if service account is active
     if (googleSheetsClient.isLiveReady()) {
       const headers = sheet.headers;
       const rowArr = headers.map((h) => (rowToSave[h] !== undefined && rowToSave[h] !== null ? rowToSave[h] : ''));
-      googleSheetsClient.appendRow(tabName, rowArr).catch((err) => {
-        console.warn(`[GoogleSheetsSync] Async append to ${tabName} failed:`, err.message);
-      });
+      try {
+        await googleSheetsClient.appendRow(tabName, rowArr);
+      } catch (err: any) {
+        console.warn(`[GoogleSheetsSync] Live append to ${tabName} failed:`, err.message);
+      }
     }
 
     return rowToSave as T;
@@ -364,13 +366,15 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
 
     sheet.rows[index] = merged;
 
-    // Asynchronously replicate update to live Google Sheets API (row index is index + 2 due to 1-indexed header)
+    // Synchronously replicate update to live Google Sheets API (row index is index + 2 due to 1-indexed header)
     if (googleSheetsClient.isLiveReady()) {
       const headers = sheet.headers;
       const rowArr = headers.map((h) => (merged[h] !== undefined && merged[h] !== null ? merged[h] : ''));
-      googleSheetsClient.updateRow(tabName, index + 2, rowArr).catch((err) => {
-        console.warn(`[GoogleSheetsSync] Async update in ${tabName} at row ${index + 2} failed:`, err.message);
-      });
+      try {
+        await googleSheetsClient.updateRow(tabName, index + 2, rowArr);
+      } catch (err: any) {
+        console.warn(`[GoogleSheetsSync] Live update in ${tabName} at row ${index + 2} failed:`, err.message);
+      }
     }
 
     return merged as T;
@@ -390,6 +394,16 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
     }
 
     sheet.rows.splice(index, 1);
+
+    // Synchronously delete from Google Sheets if live ready
+    if (googleSheetsClient.isLiveReady()) {
+      try {
+        await googleSheetsClient.deleteRow(tabName, index + 2);
+      } catch (err: any) {
+        console.warn(`[GoogleSheetsSync] Live delete in ${tabName} at row ${index + 2} failed:`, err.message);
+      }
+    }
+
     return true;
   }
 

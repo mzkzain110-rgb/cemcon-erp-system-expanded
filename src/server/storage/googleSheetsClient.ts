@@ -174,6 +174,11 @@ export class GoogleSheetsServiceAccountClient {
     }
   }
 
+  private safeTabRange(tabName: string, cellRange: string): string {
+    const escaped = tabName.replace(/'/g, "''");
+    return `'${escaped}'!${cellRange}`;
+  }
+
   private formatCellValue(val: any): any {
     if (val === undefined || val === null) return '';
     if (typeof val === 'string' && /^0\d+$/.test(val)) {
@@ -193,7 +198,7 @@ export class GoogleSheetsServiceAccountClient {
       const formatted = rowValues.map((v) => this.formatCellValue(v));
       await this.sheetsApi!.spreadsheets.values.append({
         spreadsheetId: sheetId,
-        range: `${tabName}!A1`,
+        range: this.safeTabRange(tabName, 'A1'),
         valueInputOption: 'USER_ENTERED',
         requestBody: {
           values: [formatted],
@@ -217,7 +222,7 @@ export class GoogleSheetsServiceAccountClient {
       const formatted = rowValues.map((v) => this.formatCellValue(v));
       await this.sheetsApi!.spreadsheets.values.update({
         spreadsheetId: sheetId,
-        range: `${tabName}!A${rowIndex}`,
+        range: this.safeTabRange(tabName, `A${rowIndex}`),
         valueInputOption: 'USER_ENTERED',
         requestBody: {
           values: [formatted],
@@ -226,6 +231,42 @@ export class GoogleSheetsServiceAccountClient {
       return true;
     } catch (err: any) {
       console.warn(`[GoogleSheetsClient] Failed to update row in ${tabName}:`, err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Delete a specific row in Google Sheets
+   */
+  public async deleteRow(tabName: string, rowIndex: number): Promise<boolean> {
+    if (!this.isLiveReady()) return false;
+    const sheetId = (process.env.GOOGLE_SHEET_ID || '').trim().replace(/^["']|["']$/g, '');
+
+    try {
+      const meta = await this.sheetsApi!.spreadsheets.get({ spreadsheetId: sheetId });
+      const sheetObj = meta.data.sheets?.find((s) => s.properties?.title === tabName);
+      if (!sheetObj || sheetObj.properties?.sheetId === undefined) return false;
+
+      await this.sheetsApi!.spreadsheets.batchUpdate({
+        spreadsheetId: sheetId,
+        requestBody: {
+          requests: [
+            {
+              deleteDimension: {
+                range: {
+                  sheetId: sheetObj.properties.sheetId,
+                  dimension: 'ROWS',
+                  startIndex: rowIndex - 1,
+                  endIndex: rowIndex,
+                },
+              },
+            },
+          ],
+        },
+      });
+      return true;
+    } catch (err: any) {
+      console.warn(`[GoogleSheetsClient] Failed to delete row in ${tabName}:`, err.message);
       return false;
     }
   }
@@ -240,7 +281,7 @@ export class GoogleSheetsServiceAccountClient {
     try {
       const res = await this.sheetsApi!.spreadsheets.values.get({
         spreadsheetId: sheetId,
-        range: `${tabName}!A1:ZZ`,
+        range: this.safeTabRange(tabName, 'A1:ZZ'),
       });
       return res.data.values || [];
     } catch (err: any) {
@@ -250,8 +291,41 @@ export class GoogleSheetsServiceAccountClient {
   }
 
   /**
-   * Efficiently batch-initializes all 54 Compenia ERP tabs in the remote spreadsheet.
-   * Uses single batchUpdate for adding missing tabs and values.batchUpdate for headers and seed data.
+   * Reads raw row values from all production tabs in batches
+   */
+  public async loadAllRemoteTabsData(): Promise<Map<string, any[][]>> {
+    const resultMap = new Map<string, any[][]>();
+    if (!this.isLiveReady()) return resultMap;
+    const sheetId = (process.env.GOOGLE_SHEET_ID || '').trim().replace(/^["']|["']$/g, '');
+
+    try {
+      const tabNames = Object.keys(ERP_TAB_SCHEMAS);
+      const chunkSize = 25;
+      for (let i = 0; i < tabNames.length; i += chunkSize) {
+        const chunk = tabNames.slice(i, i + chunkSize);
+        const ranges = chunk.map((t) => this.safeTabRange(t, 'A1:ZZ'));
+        const res = await this.sheetsApi!.spreadsheets.values.batchGet({
+          spreadsheetId: sheetId,
+          ranges,
+        });
+        const valueRanges = res.data.valueRanges || [];
+        for (let j = 0; j < chunk.length; j++) {
+          const tabName = chunk[j];
+          const vr = valueRanges[j];
+          resultMap.set(tabName, vr?.values || []);
+        }
+      }
+    } catch (err: any) {
+      console.warn('[GoogleSheetsClient] Error loading remote tabs in batch:', err.message);
+    }
+
+    return resultMap;
+  }
+
+  /**
+   * Efficiently synchronizes all 69 Compenia ERP tabs with Google Sheets.
+   * If remote tabs already have data, it preserves and loads them into memory!
+   * If tabs are empty or missing, it creates and seeds them.
    */
   public async initializeRemoteSpreadsheet(localDataMap: Map<string, { headers: string[]; rows: Record<string, any>[] }>): Promise<{
     success: boolean;
@@ -278,7 +352,7 @@ export class GoogleSheetsServiceAccountClient {
       const remoteSheets = meta.data.sheets || [];
       const existingSheetTitles = new Set(remoteSheets.map((s) => s.properties?.title));
 
-      // 1. Identify all missing tabs from ERP_TAB_SCHEMAS
+      // 1. Identify all missing tabs from ERP_TAB_SCHEMAS and create them
       const addSheetRequests: sheets_v4.Schema$Request[] = [];
       const missingTabNames: string[] = [];
 
@@ -296,18 +370,14 @@ export class GoogleSheetsServiceAccountClient {
         }
       }
 
-      // Execute single batchUpdate to create all missing tabs at once
       if (addSheetRequests.length > 0) {
         console.log(`[GoogleSheetsSync] Creating ${addSheetRequests.length} missing tabs in batch...`);
-        // Batch in groups of 30 if needed to stay well under request limits
         const chunkSize = 30;
         for (let i = 0; i < addSheetRequests.length; i += chunkSize) {
           const chunk = addSheetRequests.slice(i, i + chunkSize);
           await this.sheetsApi!.spreadsheets.batchUpdate({
             spreadsheetId: sheetId,
-            requestBody: {
-              requests: chunk,
-            },
+            requestBody: { requests: chunk },
           });
         }
         createdTabs = missingTabNames.length;
@@ -321,67 +391,99 @@ export class GoogleSheetsServiceAccountClient {
           await this.sheetsApi!.spreadsheets.batchUpdate({
             spreadsheetId: sheetId,
             requestBody: {
-              requests: [
-                {
-                  deleteSheet: {
-                    sheetId: defaultSheet1.properties.sheetId,
-                  },
-                },
-              ],
+              requests: [{ deleteSheet: { sheetId: defaultSheet1.properties.sheetId } }],
             },
           });
           console.log('[GoogleSheetsSync] Cleaned up placeholder Sheet1.');
-        } catch (e: any) {
-          console.warn('[GoogleSheetsSync] Could not remove Sheet1 (ignoring):', e.message);
+        } catch {
+          // ignore if Sheet1 cannot be removed
         }
       }
 
-      // 2. Prepare batch data update for all tabs (headers + seed rows)
-      const valueRanges: sheets_v4.Schema$ValueRange[] = [];
+      // 2. Read existing remote data from Google Sheets across all tabs
+      console.log(`[GoogleSheetsSync] Reading existing records from Google Sheet tabs...`);
+      const remoteDataMap = await this.loadAllRemoteTabsData();
+
+      // 3. Hydrate memory from Google Sheets, or seed only empty tabs
+      const valueRangesToSeed: sheets_v4.Schema$ValueRange[] = [];
 
       for (const [tabName, schema] of Object.entries(ERP_TAB_SCHEMAS)) {
         const headers = schema.columns.map((c) => c.name);
-        const localSheet = localDataMap.get(tabName);
-        const rowsToUpload: any[][] = [headers];
+        const remoteValues = remoteDataMap.get(tabName) || [];
 
-        if (localSheet && localSheet.rows.length > 0) {
-          for (const row of localSheet.rows) {
-            const rowArr = headers.map((h) => this.formatCellValue(row[h]));
-            rowsToUpload.push(rowArr);
-            syncedRows++;
+        if (remoteValues.length > 1) {
+          // Tab has existing rows in Google Sheets!
+          // Hydrate local memory from Google Sheets so records are preserved across cold starts
+          const remoteHeaders = (remoteValues[0] || []).map((h: any) => String(h || '').trim());
+          const records: Record<string, any>[] = [];
+
+          for (let r = 1; r < remoteValues.length; r++) {
+            const rowVals = remoteValues[r];
+            if (!rowVals || rowVals.length === 0 || rowVals.every((v: any) => v === '' || v === undefined)) continue;
+            const rec: Record<string, any> = {};
+            for (let c = 0; c < remoteHeaders.length; c++) {
+              const colName = remoteHeaders[c];
+              if (colName) {
+                let cellVal = rowVals[c] !== undefined ? rowVals[c] : '';
+                if (typeof cellVal === 'string' && cellVal.startsWith("'")) {
+                  cellVal = cellVal.slice(1);
+                }
+                rec[colName] = cellVal;
+              }
+            }
+            records.push(rec);
           }
+
+          localDataMap.set(tabName, {
+            headers,
+            rows: records,
+          });
+          syncedRows += records.length;
+        } else {
+          // Tab is EMPTY or brand new. Write initial headers and local seed data
+          const localSheet = localDataMap.get(tabName);
+          const rowsToUpload: any[][] = [headers];
+
+          if (localSheet && localSheet.rows.length > 0) {
+            for (const row of localSheet.rows) {
+              const rowArr = headers.map((h) => this.formatCellValue(row[h]));
+              rowsToUpload.push(rowArr);
+              syncedRows++;
+            }
+          }
+
+          valueRangesToSeed.push({
+            range: this.safeTabRange(tabName, 'A1'),
+            values: rowsToUpload,
+          });
         }
-
-        valueRanges.push({
-          range: `${tabName}!A1`,
-          values: rowsToUpload,
-        });
       }
 
-      // Execute batch values update (in chunks of 20 to be safe and responsive)
-      console.log(`[GoogleSheetsSync] Writing headers and records across ${valueRanges.length} tabs in Google Sheets...`);
-      const valChunkSize = 20;
-      for (let i = 0; i < valueRanges.length; i += valChunkSize) {
-        const chunk = valueRanges.slice(i, i + valChunkSize);
-        await this.sheetsApi!.spreadsheets.values.batchUpdate({
-          spreadsheetId: sheetId,
-          requestBody: {
-            valueInputOption: 'USER_ENTERED',
-            data: chunk,
-          },
-        });
+      // Write headers/seed rows only to empty tabs
+      if (valueRangesToSeed.length > 0) {
+        console.log(`[GoogleSheetsSync] Seeding ${valueRangesToSeed.length} empty tabs in Google Sheets...`);
+        const valChunkSize = 20;
+        for (let i = 0; i < valueRangesToSeed.length; i += valChunkSize) {
+          const chunk = valueRangesToSeed.slice(i, i + valChunkSize);
+          await this.sheetsApi!.spreadsheets.values.batchUpdate({
+            spreadsheetId: sheetId,
+            requestBody: {
+              valueInputOption: 'USER_ENTERED',
+              data: chunk,
+            },
+          });
+        }
       }
 
-      console.log(`[GoogleSheetsSync] All ${valueRanges.length} tabs written successfully to Google Sheet.`);
+      console.log(`[GoogleSheetsSync] All tabs verified. Total active records in system: ${syncedRows}`);
 
-      // Update status
       this.lastStatus = {
         isConfigured: true,
         projectId: process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, '') || null,
         clientEmail: process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, '') || null,
         sheetId,
         liveStatus: 'CONNECTED',
-        statusMessage: `Connected to Google Sheet "${meta.data.properties?.title || 'Compenia ERP'}". All ${valueRanges.length} production tabs verified and synchronized.`,
+        statusMessage: `Connected to Google Sheet "${meta.data.properties?.title || 'Compenia ERP'}". All ${Object.keys(ERP_TAB_SCHEMAS).length} tabs synchronized and hydrated.`,
         spreadsheetTitle: meta.data.properties?.title || 'Compenia ERP Database',
         availableRemoteTabs: Object.keys(ERP_TAB_SCHEMAS),
         lastChecked: new Date().toISOString(),
@@ -391,7 +493,7 @@ export class GoogleSheetsServiceAccountClient {
         success: true,
         createdTabsCount: createdTabs,
         syncedRowsCount: syncedRows,
-        message: `Google Spreadsheet populated successfully. ${valueRanges.length} production tabs active with live synchronization.`,
+        message: `Google Spreadsheet populated and hydrated successfully. Persistent multi-tenant storage active.`,
       };
     } catch (err: any) {
       console.error('[GoogleSheetsSync] Failed to initialize spreadsheet:', err.message);
