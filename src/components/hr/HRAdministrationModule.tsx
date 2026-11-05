@@ -80,7 +80,7 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('');
   const [deptFilter, setDeptFilter] = useState('ALL');
-  const [empStatusFilter, setEmpStatusFilter] = useState<'ALL' | 'ACTIVE' | 'PROBATION' | 'ON_LEAVE' | 'TERMINATED'>('ALL');
+  const [empStatusFilter, setEmpStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE' | 'PROBATION' | 'ON_LEAVE' | 'TERMINATED'>('ALL');
 
   // Modals
   const [isRegisteringEmp, setIsRegisteringEmp] = useState(false);
@@ -102,6 +102,15 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
   const [newEmpPhone, setNewEmpPhone] = useState('');
   const [newEmpJoiningDate, setNewEmpJoiningDate] = useState(new Date().toISOString().split('T')[0]);
   const [newEmpPhoto, setNewEmpPhoto] = useState('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80');
+
+  // Passport & Status State for Employee Registration
+  const [newEmpPassportNo, setNewEmpPassportNo] = useState('');
+  const [newEmpPassportExpiry, setNewEmpPassportExpiry] = useState('');
+  const [newEmpPassportIssue, setNewEmpPassportIssue] = useState('');
+  const [newEmpNationality, setNewEmpNationality] = useState('');
+  const [newEmpPassportPlace, setNewEmpPassportPlace] = useState('');
+  const [newEmpStatus, setNewEmpStatus] = useState<'ACTIVE' | 'INACTIVE'>('ACTIVE');
+  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
 
   // Load HR Data
   const fetchHRData = async () => {
@@ -231,15 +240,21 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          employee_no: newEmpNo,
-          full_name: newEmpName,
-          designation: newEmpDesignation,
+          employee_no: newEmpNo.trim().toUpperCase(),
+          full_name: newEmpName.trim(),
+          designation: newEmpDesignation.trim(),
           department_id: newEmpDept,
-          email: newEmpEmail,
-          phone: newEmpPhone,
+          email: newEmpEmail.trim(),
+          phone: newEmpPhone.trim(),
           joining_date: newEmpJoiningDate,
           profile_photo: newEmpPhoto,
-          status: 'ACTIVE',
+          status: newEmpStatus,
+          passport_no: newEmpPassportNo.trim().toUpperCase(),
+          passport_expiry_date: newEmpPassportExpiry || null,
+          passport_issue_date: newEmpPassportIssue || null,
+          passport_country: newEmpNationality.trim(),
+          passport_place_of_issue: newEmpPassportPlace.trim(),
+          nationality: newEmpNationality.trim(),
         }),
       });
 
@@ -250,10 +265,48 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
         setNewEmpDesignation('');
         setNewEmpEmail('');
         setNewEmpPhone('');
+        setNewEmpPassportNo('');
+        setNewEmpPassportExpiry('');
+        setNewEmpPassportIssue('');
+        setNewEmpNationality('');
+        setNewEmpPassportPlace('');
+        setNewEmpStatus('ACTIVE');
         onRefreshEmployees();
+        fetchHRData();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Error registering employee: ${errData.error || 'Server rejected creation'}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to create employee:', err);
+      alert(`Error creating employee: ${err.message}`);
+    }
+  };
+
+  // Handler: Update Employee Status (Active / Inactive toggle & dropdown)
+  const handleUpdateEmployeeStatus = async (employeeId: string, newStatus: string) => {
+    try {
+      setStatusUpdatingId(employeeId);
+      const res = await fetch(`/api/employees/${employeeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: newStatus,
+          cancellation_date: newStatus === 'INACTIVE' || newStatus === 'TERMINATED' ? new Date().toISOString().split('T')[0] : null,
+        }),
+      });
+
+      if (res.ok) {
+        onRefreshEmployees();
+        fetchHRData();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Failed to update status: ${errData.error || 'Operation failed'}`);
+      }
+    } catch (err: any) {
+      alert(`Error updating employee status: ${err.message}`);
+    } finally {
+      setStatusUpdatingId(null);
     }
   };
 
@@ -627,6 +680,7 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
               >
                 <option value="ALL">All Statuses ({employees.length})</option>
                 <option value="ACTIVE">Active ({employees.filter((e) => e.status === 'ACTIVE').length})</option>
+                <option value="INACTIVE">Inactive ({employees.filter((e) => e.status === 'INACTIVE').length})</option>
                 <option value="PROBATION">Probation</option>
                 <option value="ON_LEAVE">On Leave</option>
                 <option value="TERMINATED">Non-Active / Cancelled ({employees.filter((e) => e.status === 'TERMINATED').length})</option>
@@ -673,11 +727,12 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
                   <tr>
                     <th className="py-3 px-4 font-semibold">Employee</th>
                     <th className="py-3 px-4 font-semibold">Department</th>
+                    <th className="py-3 px-4 font-semibold">Passport Details</th>
                     <th className="py-3 px-4 font-semibold">Contact Info</th>
                     <th className="py-3 px-4 font-semibold">Joining Date</th>
                     <th className="py-3 px-4 font-semibold">Cancellation Date</th>
                     <th className="py-3 px-4 font-semibold">Documents</th>
-                    <th className="py-3 px-4 font-semibold">Status</th>
+                    <th className="py-3 px-4 font-semibold">Status (Active / Inactive)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
@@ -692,6 +747,7 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
                         emp.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                         emp.designation?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                         emp.employee_no?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        emp.passport_no?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                         emp.email?.toLowerCase().includes(searchQuery.toLowerCase());
                       return matchesStatus && matchesDept && matchesSearch;
                     });
@@ -699,7 +755,7 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
                     if (filtered.length === 0) {
                       return (
                         <tr>
-                          <td colSpan={7} className="py-12 text-center text-slate-500">
+                          <td colSpan={8} className="py-12 text-center text-slate-500">
                             <div className="flex flex-col items-center justify-center gap-2">
                               <UserCheck className="h-8 w-8 text-slate-600" />
                               <p className="text-sm font-semibold text-slate-400">No personnel registered yet</p>
@@ -738,8 +794,13 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
                               <div>
                                 <div className="font-bold text-white flex items-center gap-1.5">
                                   <span>{emp.full_name}</span>
-                                  {emp.status === 'TERMINATED' && (
+                                  {emp.status === 'INACTIVE' && (
                                     <span className="text-[9px] px-1.5 py-0.2 rounded font-mono bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                      INACTIVE
+                                    </span>
+                                  )}
+                                  {emp.status === 'TERMINATED' && (
+                                    <span className="text-[9px] px-1.5 py-0.2 rounded font-mono bg-slate-800 text-slate-400 border border-slate-700">
                                       CANCELLED
                                     </span>
                                   )}
@@ -755,6 +816,35 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
                             <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800 text-blue-300 border border-slate-700">
                               {dept ? dept.name : emp.department_id}
                             </span>
+                          </td>
+
+                          {/* Passport Details */}
+                          <td className="py-3 px-4">
+                            {emp.passport_no ? (
+                              <div className="space-y-0.5">
+                                <div className="font-mono font-bold text-emerald-400 text-xs flex items-center gap-1">
+                                  <ShieldCheck className="h-3 w-3 text-emerald-400 flex-shrink-0" />
+                                  <span>{emp.passport_no}</span>
+                                </div>
+                                <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                                  <span>Exp:</span>
+                                  <span className={`font-mono font-medium ${
+                                    emp.passport_expiry_date && new Date(emp.passport_expiry_date) < new Date()
+                                      ? 'text-rose-400 font-bold'
+                                      : 'text-slate-300'
+                                  }`}>
+                                    {emp.passport_expiry_date || '—'}
+                                  </span>
+                                </div>
+                                {(emp.nationality || emp.passport_country) && (
+                                  <div className="text-[10px] text-slate-500 truncate max-w-[130px]">
+                                    {emp.nationality || emp.passport_country}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-500 italic">No passport recorded</span>
+                            )}
                           </td>
 
                           {/* Contact */}
@@ -807,19 +897,34 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
                             </div>
                           </td>
 
-                          {/* Status */}
+                          {/* Interactive Status Dropdown (Active / Inactive) */}
                           <td className="py-3 px-4">
-                            <span
-                              className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-bold ${
-                                emp.status === 'ACTIVE'
-                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                  : emp.status === 'TERMINATED'
-                                  ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                              }`}
-                            >
-                              {emp.status}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <select
+                                value={emp.status || 'ACTIVE'}
+                                disabled={statusUpdatingId === emp.employee_id}
+                                onChange={(e) => handleUpdateEmployeeStatus(emp.employee_id, e.target.value)}
+                                className={`font-mono text-[11px] font-bold rounded-lg px-2.5 py-1 border transition cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+                                  emp.status === 'ACTIVE'
+                                    ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900/60'
+                                    : emp.status === 'INACTIVE'
+                                    ? 'bg-rose-950/80 text-rose-300 border-rose-500/40 hover:bg-rose-900/60'
+                                    : emp.status === 'TERMINATED'
+                                    ? 'bg-slate-900 text-slate-400 border-slate-700'
+                                    : 'bg-amber-950/80 text-amber-300 border-amber-500/40 hover:bg-amber-900/60'
+                                }`}
+                                title="Click to change employee status"
+                              >
+                                <option value="ACTIVE" className="bg-slate-900 text-emerald-400 font-bold">● Active</option>
+                                <option value="INACTIVE" className="bg-slate-900 text-rose-400 font-bold">● Inactive</option>
+                                <option value="PROBATION" className="bg-slate-900 text-amber-400">Probation</option>
+                                <option value="ON_LEAVE" className="bg-slate-900 text-blue-400">On Leave</option>
+                                <option value="TERMINATED" className="bg-slate-900 text-slate-400">Terminated</option>
+                              </select>
+                              {statusUpdatingId === emp.employee_id && (
+                                <RefreshCw className="h-3.5 w-3.5 text-blue-400 animate-spin flex-shrink-0" />
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -1526,16 +1631,17 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
       {/* MODAL: REGISTER PERSONNEL */}
       {isRegisteringEmp && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
-          <div className="relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-6">
+          <div className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-6">
             <h3 className="text-base font-bold text-white mb-1 flex items-center gap-2">
               <UserCheck className="h-5 w-5 text-indigo-400" /> Register Enterprise Personnel
             </h3>
             <p className="text-xs text-slate-400 mb-4">
-              Add personnel master data mapped to a CEMCON department and operating company.
+              Add personnel master data with official passport details, mapped to department and operating entity.
             </p>
 
-            <form onSubmit={handleRegisterEmployee} className="space-y-3.5 text-xs">
-              <div className="grid grid-cols-2 gap-3">
+            <form onSubmit={handleRegisterEmployee} className="space-y-4 text-xs">
+              {/* Basic Identification */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Employee ID Number *</label>
                   <input
@@ -1544,7 +1650,7 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
                     placeholder="e.g. EMP-1012"
                     value={newEmpNo}
                     onChange={(e) => setNewEmpNo(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 focus:ring-1 focus:ring-blue-500 font-mono"
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 focus:ring-1 focus:ring-blue-500 font-mono uppercase"
                   />
                 </div>
                 <div>
@@ -1563,39 +1669,51 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
                     ))}
                   </select>
                 </div>
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Employee Status *</label>
+                  <select
+                    value={newEmpStatus}
+                    onChange={(e) => setNewEmpStatus(e.target.value as any)}
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 font-semibold focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="ACTIVE" className="text-emerald-400 font-bold">Active</option>
+                    <option value="INACTIVE" className="text-rose-400 font-bold">Inactive</option>
+                  </select>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Full Legal Name *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Employee Full Name"
-                  value={newEmpName}
-                  onChange={(e) => setNewEmpName(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 focus:ring-1 focus:ring-blue-500"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Full Legal Name *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Farooq Qasim"
+                    value={newEmpName}
+                    onChange={(e) => setNewEmpName(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Designation / Role *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Senior Welding Inspector"
+                    value={newEmpDesignation}
+                    onChange={(e) => setNewEmpDesignation(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Designation / Role *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Senior Welding Inspector"
-                  value={newEmpDesignation}
-                  onChange={(e) => setNewEmpDesignation(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Official Email *</label>
                   <input
                     type="email"
                     required
-                    placeholder="e.g. qaiser.s@cemcon.ae"
+                    placeholder="e.g. employee@cemcon.ae"
                     value={newEmpEmail}
                     onChange={(e) => setNewEmpEmail(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 focus:ring-1 focus:ring-blue-500"
@@ -1613,7 +1731,72 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              {/* PASSPORT & TRAVEL DOCUMENT DETAILS SECTION */}
+              <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                    <span className="font-bold text-white text-xs uppercase tracking-wider">Employee Passport Details</span>
+                  </div>
+                  <span className="text-[10px] text-emerald-400 font-mono">HR Compliance</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Passport Number</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. M12345678"
+                      value={newEmpPassportNo}
+                      onChange={(e) => setNewEmpPassportNo(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 font-mono uppercase focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Nationality / Country</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. United Arab Emirates, Pakistan, India..."
+                      value={newEmpNationality}
+                      onChange={(e) => setNewEmpNationality(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Passport Expiry Date</label>
+                    <input
+                      type="date"
+                      value={newEmpPassportExpiry}
+                      onChange={(e) => setNewEmpPassportExpiry(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 font-mono focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Passport Issue Date</label>
+                    <input
+                      type="date"
+                      value={newEmpPassportIssue}
+                      onChange={(e) => setNewEmpPassportIssue(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 font-mono focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Place of Issue</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Dubai, Islamabad..."
+                      value={newEmpPassportPlace}
+                      onChange={(e) => setNewEmpPassportPlace(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Joining Date *</label>
                   <input
@@ -1625,7 +1808,7 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Profile Photo URL</label>
+                  <label className="block text-slate-300 font-medium mb-1">Profile Photo URL (Optional)</label>
                   <input
                     type="url"
                     placeholder="https://..."

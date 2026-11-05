@@ -150,6 +150,13 @@ export default function App() {
   const [newEmpDeptId, setNewEmpDeptId] = useState('');
   const [newEmpEmail, setNewEmpEmail] = useState('');
   const [newEmpPhone, setNewEmpPhone] = useState('');
+  const [newEmpPassportNo, setNewEmpPassportNo] = useState('');
+  const [newEmpPassportExpiry, setNewEmpPassportExpiry] = useState('');
+  const [newEmpPassportIssue, setNewEmpPassportIssue] = useState('');
+  const [newEmpNationality, setNewEmpNationality] = useState('');
+  const [newEmpPassportPlace, setNewEmpPassportPlace] = useState('');
+  const [newEmpStatus, setNewEmpStatus] = useState<'ACTIVE' | 'INACTIVE'>('ACTIVE');
+  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
 
   // Notifications & Reminders
   const [reminders, setReminders] = useState<any[]>([]);
@@ -642,8 +649,14 @@ export default function App() {
           department_id: newEmpDeptId,
           email: newEmpEmail.trim(),
           phone: newEmpPhone.trim(),
-          status: 'ACTIVE',
+          status: newEmpStatus,
           joining_date: new Date().toISOString().split('T')[0],
+          passport_no: newEmpPassportNo.trim().toUpperCase(),
+          passport_expiry_date: newEmpPassportExpiry || null,
+          passport_issue_date: newEmpPassportIssue || null,
+          passport_country: newEmpNationality.trim(),
+          passport_place_of_issue: newEmpPassportPlace.trim(),
+          nationality: newEmpNationality.trim(),
         }),
       });
       if (res.ok) {
@@ -654,6 +667,12 @@ export default function App() {
         setNewEmpDeptId('');
         setNewEmpEmail('');
         setNewEmpPhone('');
+        setNewEmpPassportNo('');
+        setNewEmpPassportExpiry('');
+        setNewEmpPassportIssue('');
+        setNewEmpNationality('');
+        setNewEmpPassportPlace('');
+        setNewEmpStatus('ACTIVE');
         setRefreshTrigger((prev) => prev + 1);
       } else {
         const errMsg = await safeExtractError(res, 'Failed to create employee');
@@ -661,6 +680,30 @@ export default function App() {
       }
     } catch (err: any) {
       alert(`Error creating employee: ${err.message}`);
+    }
+  };
+
+  const handleUpdateEmployeeStatus = async (employeeId: string, newStatus: string) => {
+    try {
+      setStatusUpdatingId(employeeId);
+      const res = await fetch(`/api/employees/${employeeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: newStatus,
+          cancellation_date: newStatus === 'INACTIVE' || newStatus === 'TERMINATED' ? new Date().toISOString().split('T')[0] : null,
+        }),
+      });
+      if (res.ok) {
+        setRefreshTrigger((prev) => prev + 1);
+      } else {
+        const errMsg = await safeExtractError(res, 'Failed to update employee status');
+        alert(`Status Error: ${errMsg}`);
+      }
+    } catch (err: any) {
+      alert(`Error updating employee status: ${err.message}`);
+    } finally {
+      setStatusUpdatingId(null);
     }
   };
 
@@ -1468,11 +1511,12 @@ export default function App() {
                           <tr>
                             <th className="py-3 px-4 font-semibold">Employee ID</th>
                             <th className="py-3 px-4 font-semibold">Full Name</th>
+                            <th className="py-3 px-4 font-semibold">Passport Details</th>
                             <th className="py-3 px-4 font-semibold">Designation</th>
                             <th className="py-3 px-4 font-semibold">Department</th>
                             <th className="py-3 px-4 font-semibold">Contact Email</th>
                             <th className="py-3 px-4 font-semibold">Phone</th>
-                            <th className="py-3 px-4 font-semibold">Status</th>
+                            <th className="py-3 px-4 font-semibold">Status (Active / Inactive)</th>
                             <th className="py-3 px-4 font-semibold">Joining Date</th>
                           </tr>
                         </thead>
@@ -1490,6 +1534,7 @@ export default function App() {
                                 emp.full_name?.toLowerCase().includes(searchEmployeeQuery.toLowerCase()) ||
                                 emp.designation?.toLowerCase().includes(searchEmployeeQuery.toLowerCase()) ||
                                 emp.email?.toLowerCase().includes(searchEmployeeQuery.toLowerCase()) ||
+                                emp.passport_no?.toLowerCase().includes(searchEmployeeQuery.toLowerCase()) ||
                                 emp.employee_no?.toLowerCase().includes(searchEmployeeQuery.toLowerCase());
                               return matchesDept && matchesSearch;
                             })
@@ -1498,7 +1543,39 @@ export default function App() {
                               return (
                                 <tr key={emp.employee_id} className="hover:bg-slate-800/40 transition">
                                   <td className="py-3 px-4 font-mono font-bold text-blue-300">{emp.employee_no}</td>
-                                  <td className="py-3 px-4 font-semibold text-white">{emp.full_name}</td>
+                                  <td className="py-3 px-4">
+                                    <div className="font-semibold text-white flex items-center gap-1.5">
+                                      <span>{emp.full_name}</span>
+                                      {emp.status === 'INACTIVE' && (
+                                        <span className="text-[9px] px-1.5 py-0.2 rounded font-mono bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                          INACTIVE
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-4">
+                                    {emp.passport_no ? (
+                                      <div className="space-y-0.5">
+                                        <div className="font-mono font-bold text-emerald-400 text-xs flex items-center gap-1">
+                                          <ShieldCheck className="h-3 w-3 text-emerald-400 flex-shrink-0" />
+                                          <span>{emp.passport_no}</span>
+                                        </div>
+                                        <div className="text-[10px] text-slate-400 flex items-center gap-1 font-mono">
+                                          <span>Exp:</span>
+                                          <span className={emp.passport_expiry_date && new Date(emp.passport_expiry_date) < new Date() ? 'text-rose-400 font-bold' : 'text-slate-300'}>
+                                            {emp.passport_expiry_date || '—'}
+                                          </span>
+                                        </div>
+                                        {(emp.nationality || emp.passport_country) && (
+                                          <div className="text-[10px] text-slate-500 truncate max-w-[120px]">
+                                            {emp.nationality || emp.passport_country}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-500 italic text-[11px]">No passport</span>
+                                    )}
+                                  </td>
                                   <td className="py-3 px-4 text-slate-300">{emp.designation}</td>
                                   <td className="py-3 px-4">
                                     <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800 text-blue-300 border border-slate-700">
@@ -1520,9 +1597,32 @@ export default function App() {
                                     )}
                                   </td>
                                   <td className="py-3 px-4">
-                                    <span className="px-2 py-0.5 rounded-full font-mono text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                      {emp.status}
-                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                      <select
+                                        value={emp.status || 'ACTIVE'}
+                                        disabled={statusUpdatingId === emp.employee_id}
+                                        onChange={(e) => handleUpdateEmployeeStatus(emp.employee_id, e.target.value)}
+                                        className={`font-mono text-[11px] font-bold rounded-lg px-2.5 py-1 border transition cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+                                          emp.status === 'ACTIVE'
+                                            ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900/60'
+                                            : emp.status === 'INACTIVE'
+                                            ? 'bg-rose-950/80 text-rose-300 border-rose-500/40 hover:bg-rose-900/60'
+                                            : emp.status === 'TERMINATED'
+                                            ? 'bg-slate-900 text-slate-400 border-slate-700'
+                                            : 'bg-amber-950/80 text-amber-300 border-amber-500/40 hover:bg-amber-900/60'
+                                        }`}
+                                        title="Click to toggle or change status (Active / Inactive)"
+                                      >
+                                        <option value="ACTIVE" className="bg-slate-900 text-emerald-400 font-bold">● Active</option>
+                                        <option value="INACTIVE" className="bg-slate-900 text-rose-400 font-bold">● Inactive</option>
+                                        <option value="PROBATION" className="bg-slate-900 text-amber-400">Probation</option>
+                                        <option value="ON_LEAVE" className="bg-slate-900 text-blue-400">On Leave</option>
+                                        <option value="TERMINATED" className="bg-slate-900 text-slate-400">Terminated</option>
+                                      </select>
+                                      {statusUpdatingId === emp.employee_id && (
+                                        <RefreshCw className="h-3.5 w-3.5 text-blue-400 animate-spin flex-shrink-0" />
+                                      )}
+                                    </div>
                                   </td>
                                   <td className="py-3 px-4 font-mono text-[11px] text-slate-400">{emp.joining_date}</td>
                                 </tr>
@@ -1591,28 +1691,28 @@ export default function App() {
               {/* MODAL: REGISTER PERSONNEL */}
               {isCreatingEmp && (
                 <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl">
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 shadow-2xl">
                     <h3 className="text-base font-bold text-white mb-2 flex items-center gap-2">
                       <UserCheck className="h-4 w-4 text-indigo-400" /> Register Employee / Personnel
                     </h3>
                     <p className="text-xs text-slate-400 mb-4">
-                      Appends a new employee master record into the Employees database tab.
+                      Appends a new employee master record with passport compliance data into the Employees database tab.
                     </p>
-                    <form onSubmit={handleCreateEmployee} className="space-y-3">
-                      <div className="grid grid-cols-2 gap-3">
+                    <form onSubmit={handleCreateEmployee} className="space-y-3.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
-                          <label className="block text-xs font-medium text-slate-300 mb-1">Employee Number</label>
+                          <label className="block text-xs font-medium text-slate-300 mb-1">Employee Number *</label>
                           <input
                             type="text"
                             required
                             placeholder="e.g. EMP-1010"
                             value={newEmpNo}
                             onChange={(e) => setNewEmpNo(e.target.value)}
-                            className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs font-mono"
+                            className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs font-mono uppercase"
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-slate-300 mb-1">Department</label>
+                          <label className="block text-xs font-medium text-slate-300 mb-1">Department *</label>
                           <select
                             required
                             value={newEmpDeptId}
@@ -1627,35 +1727,47 @@ export default function App() {
                             ))}
                           </select>
                         </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-medium text-slate-300 mb-1">Full Name</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="e.g. Mohammed Al-Falasi"
-                          value={newEmpName}
-                          onChange={(e) => setNewEmpName(e.target.value)}
-                          className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-medium text-slate-300 mb-1">Designation / Role</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="e.g. Senior Welding Inspector"
-                          value={newEmpDesignation}
-                          onChange={(e) => setNewEmpDesignation(e.target.value)}
-                          className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-xs font-medium text-slate-300 mb-1">Official Email</label>
+                          <label className="block text-xs font-medium text-slate-300 mb-1">Status *</label>
+                          <select
+                            value={newEmpStatus}
+                            onChange={(e) => setNewEmpStatus(e.target.value as any)}
+                            className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs font-semibold"
+                          >
+                            <option value="ACTIVE" className="text-emerald-400 font-bold">Active</option>
+                            <option value="INACTIVE" className="text-rose-400 font-bold">Inactive</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-300 mb-1">Full Legal Name *</label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="e.g. Mohammed Al-Falasi"
+                            value={newEmpName}
+                            onChange={(e) => setNewEmpName(e.target.value)}
+                            className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-300 mb-1">Designation / Role *</label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="e.g. Senior Welding Inspector"
+                            value={newEmpDesignation}
+                            onChange={(e) => setNewEmpDesignation(e.target.value)}
+                            className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-300 mb-1">Official Email *</label>
                           <input
                             type="email"
                             required
@@ -1672,12 +1784,76 @@ export default function App() {
                             placeholder="+971-4-884-0110"
                             value={newEmpPhone}
                             onChange={(e) => setNewEmpPhone(e.target.value)}
-                            className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs"
+                            className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs font-mono"
                           />
                         </div>
                       </div>
 
-                      <div className="flex justify-end gap-2 pt-3">
+                      {/* PASSPORT DETAILS COMPLIANCE BOX */}
+                      <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-800/80 pb-1.5">
+                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                            <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" /> Passport Identification Details
+                          </span>
+                          <span className="text-[10px] text-emerald-400 font-mono">HR Verified</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[11px] font-medium text-slate-300 mb-1">Passport Number</label>
+                            <input
+                              type="text"
+                              placeholder="e.g. A98765432"
+                              value={newEmpPassportNo}
+                              onChange={(e) => setNewEmpPassportNo(e.target.value)}
+                              className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-1.5 text-xs font-mono uppercase focus:ring-1 focus:ring-emerald-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-medium text-slate-300 mb-1">Nationality / Country</label>
+                            <input
+                              type="text"
+                              placeholder="e.g. Pakistan, India, UAE..."
+                              value={newEmpNationality}
+                              onChange={(e) => setNewEmpNationality(e.target.value)}
+                              className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-1.5 text-xs focus:ring-1 focus:ring-emerald-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div>
+                            <label className="block text-[11px] font-medium text-slate-300 mb-1">Passport Expiry Date</label>
+                            <input
+                              type="date"
+                              value={newEmpPassportExpiry}
+                              onChange={(e) => setNewEmpPassportExpiry(e.target.value)}
+                              className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs font-mono focus:ring-1 focus:ring-emerald-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-medium text-slate-300 mb-1">Passport Issue Date</label>
+                            <input
+                              type="date"
+                              value={newEmpPassportIssue}
+                              onChange={(e) => setNewEmpPassportIssue(e.target.value)}
+                              className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs font-mono focus:ring-1 focus:ring-emerald-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-medium text-slate-300 mb-1">Place of Issue</label>
+                            <input
+                              type="text"
+                              placeholder="e.g. Dubai"
+                              value={newEmpPassportPlace}
+                              onChange={(e) => setNewEmpPassportPlace(e.target.value)}
+                              className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs focus:ring-1 focus:ring-emerald-500"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
                         <button
                           type="button"
                           onClick={() => setIsCreatingEmp(false)}

@@ -165,6 +165,14 @@ export class EmployeeRepository extends BaseRepository {
     this.logAudit(context, 'UPDATE', 'Employees', employeeId, existing, updated);
     return updated;
   }
+
+  async deleteEmployee(employeeId: string, context: SecurityContext) {
+    this.assertContext(context);
+    const existing = await this.storage.getRowById('Employees', employeeId, context);
+    await this.storage.deleteRow('Employees', employeeId, context);
+    this.logAudit(context, 'DELETE', 'Employees', employeeId, existing, null);
+    return true;
+  }
 }
 
 // 5. CustomerRepository

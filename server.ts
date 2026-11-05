@@ -304,10 +304,29 @@ app.get('/api/employees', async (req: Request, res: Response) => {
 app.post('/api/employees', async (req: Request, res: Response) => {
   try {
     const context = getSecurityContext(req);
-    const { employee_no, full_name, designation, department_id, email, phone, status = 'ACTIVE', joining_date } = req.body;
+    const {
+      employee_no,
+      full_name,
+      designation,
+      department_id,
+      email,
+      phone,
+      status = 'ACTIVE',
+      joining_date,
+      cancellation_date,
+      passport_no,
+      passport_issue_date,
+      passport_expiry_date,
+      passport_country,
+      passport_place_of_issue,
+      nationality,
+      profile_photo,
+    } = req.body;
+
     if (!employee_no || !full_name || !designation || !department_id || !email) {
       return res.status(400).json({ error: 'Missing required employee fields: employee_no, full_name, designation, department_id, email.' });
     }
+
     const created = await employeeRepo.createEmployee(
       {
         employee_no,
@@ -318,11 +337,42 @@ app.post('/api/employees', async (req: Request, res: Response) => {
         phone: phone || '',
         status,
         joining_date: joining_date || new Date().toISOString().split('T')[0],
+        cancellation_date: cancellation_date || (status === 'INACTIVE' || status === 'TERMINATED' ? new Date().toISOString().split('T')[0] : null),
+        passport_no: passport_no || '',
+        passport_issue_date: passport_issue_date || null,
+        passport_expiry_date: passport_expiry_date || null,
+        passport_country: passport_country || nationality || '',
+        passport_place_of_issue: passport_place_of_issue || '',
+        nationality: nationality || passport_country || '',
+        profile_photo: profile_photo || '',
         tenant_id: context.tenantId,
         company_id: context.companyId,
       },
       context
     );
+
+    // If passport info is provided, also automatically link to EmployeeDocuments for HR expiry surveillance
+    if (passport_no && passport_expiry_date) {
+      try {
+        await hrRepo.createEmployeeDocument(
+          {
+            doc_id: crypto.randomUUID(),
+            tenant_id: context.tenantId,
+            company_id: context.companyId,
+            employee_id: created.employee_id,
+            doc_type: 'PASSPORT',
+            doc_number: passport_no,
+            issue_date: passport_issue_date || created.joining_date,
+            expiry_date: passport_expiry_date,
+            status: 'VALID',
+          },
+          context
+        );
+      } catch (docErr) {
+        console.warn('Could not auto-generate passport doc record:', docErr);
+      }
+    }
+
     res.status(201).json(created);
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -332,8 +382,66 @@ app.post('/api/employees', async (req: Request, res: Response) => {
 app.patch('/api/employees/:id', async (req: Request, res: Response) => {
   try {
     const context = getSecurityContext(req);
-    const updated = await employeeRepo.updateEmployee(req.params.id, req.body, context);
+    const updates = { ...req.body };
+    if (updates.status === 'INACTIVE' || updates.status === 'TERMINATED') {
+      if (!updates.cancellation_date) {
+        updates.cancellation_date = new Date().toISOString().split('T')[0];
+      }
+    } else if (updates.status === 'ACTIVE') {
+      updates.cancellation_date = null;
+    }
+
+    const updated = await employeeRepo.updateEmployee(req.params.id, updates, context);
+
+    // If passport updated, update/create document record if needed
+    if (updates.passport_no && updates.passport_expiry_date) {
+      try {
+        const existingDocs = await hrRepo.listEmployeeDocuments(context, {
+          where: { employee_id: req.params.id, doc_type: 'PASSPORT' },
+        });
+        if (existingDocs.data && existingDocs.data.length > 0) {
+          await globalStorageAdapter.updateRow(
+            'EmployeeDocuments',
+            existingDocs.data[0].doc_id,
+            {
+              doc_number: updates.passport_no,
+              expiry_date: updates.passport_expiry_date,
+              issue_date: updates.passport_issue_date || existingDocs.data[0].issue_date,
+            },
+            context
+          );
+        } else {
+          await hrRepo.createEmployeeDocument(
+            {
+              doc_id: crypto.randomUUID(),
+              tenant_id: context.tenantId,
+              company_id: context.companyId,
+              employee_id: req.params.id,
+              doc_type: 'PASSPORT',
+              doc_number: updates.passport_no,
+              issue_date: updates.passport_issue_date || new Date().toISOString().split('T')[0],
+              expiry_date: updates.passport_expiry_date,
+              status: 'VALID',
+            },
+            context
+          );
+        }
+      } catch (err) {
+        console.warn('Could not sync passport document:', err);
+      }
+    }
+
     res.json(updated);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/employees/:id', async (req: Request, res: Response) => {
+  try {
+    const context = getSecurityContext(req);
+    await employeeRepo.deleteEmployee(req.params.id, context);
+    res.json({ success: true, deleted: req.params.id });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }

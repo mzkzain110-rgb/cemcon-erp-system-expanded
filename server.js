@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
 // src/server/storage/storageAdapter.ts
-import crypto from "crypto";
+import crypto2 from "crypto";
 
 // src/server/schema/definitions.ts
 var ERP_TAB_SCHEMAS = {
@@ -131,9 +131,15 @@ var ERP_TAB_SCHEMAS = {
       { name: "department_id", type: "uuid", required: true },
       { name: "email", type: "string", required: true },
       { name: "phone", type: "string", required: false },
-      { name: "status", type: "string", required: true, allowedValues: ["ACTIVE", "ON_LEAVE", "PROBATION", "TERMINATED"] },
+      { name: "status", type: "string", required: true, allowedValues: ["ACTIVE", "INACTIVE", "ON_LEAVE", "PROBATION", "TERMINATED"] },
       { name: "joining_date", type: "date-iso", required: true },
       { name: "cancellation_date", type: "date-iso", required: false },
+      { name: "passport_no", type: "string", required: false },
+      { name: "passport_issue_date", type: "date-iso", required: false },
+      { name: "passport_expiry_date", type: "date-iso", required: false },
+      { name: "passport_country", type: "string", required: false },
+      { name: "passport_place_of_issue", type: "string", required: false },
+      { name: "nationality", type: "string", required: false },
       { name: "profile_photo", type: "string", required: false },
       { name: "created_at", type: "date-iso", required: true }
     ]
@@ -1793,7 +1799,7 @@ var GoogleSheetsStorageAdapter = class {
     const pkCol = schema.columns.find((c) => c.primaryKey)?.name || "id";
     const rowToSave = { ...row };
     if (!rowToSave[pkCol]) {
-      rowToSave[pkCol] = crypto.randomUUID();
+      rowToSave[pkCol] = crypto2.randomUUID();
     }
     if (context) {
       if (schema.columns.some((c) => c.name === "tenant_id") && !rowToSave.tenant_id) {
@@ -2399,7 +2405,7 @@ var GoogleSheetsStorageAdapter = class {
 var globalStorageAdapter = new GoogleSheetsStorageAdapter();
 
 // src/server/repositories/index.ts
-import crypto2 from "crypto";
+import crypto3 from "crypto";
 var BaseRepository = class {
   constructor(storage) {
     this.storage = storage;
@@ -2414,7 +2420,7 @@ var BaseRepository = class {
   }
   logAudit(context, action, entityName, recordId, beforeValues, afterValues) {
     this.storage.writeRow("AuditLogs", {
-      audit_id: crypto2.randomUUID(),
+      audit_id: crypto3.randomUUID(),
       tenant_id: context.tenantId,
       company_id: context.companyId || "SYSTEM",
       user_id: context.userId,
@@ -2523,6 +2529,13 @@ var EmployeeRepository = class extends BaseRepository {
     this.logAudit(context, "UPDATE", "Employees", employeeId, existing, updated);
     return updated;
   }
+  async deleteEmployee(employeeId, context) {
+    this.assertContext(context);
+    const existing = await this.storage.getRowById("Employees", employeeId, context);
+    await this.storage.deleteRow("Employees", employeeId, context);
+    this.logAudit(context, "DELETE", "Employees", employeeId, existing, null);
+    return true;
+  }
 };
 var CustomerRepository = class extends BaseRepository {
   async listCustomers(context) {
@@ -2614,7 +2627,7 @@ var JobRepository = class extends BaseRepository {
       let seqRecord = seqResult.data[0];
       if (!seqRecord) {
         seqRecord = await this.storage.writeRow("JobSequences", {
-          sequence_id: crypto2.randomUUID(),
+          sequence_id: crypto3.randomUUID(),
           tenant_id: context.tenantId,
           company_id: companyId,
           prefix: "",
@@ -2639,7 +2652,7 @@ var JobRepository = class extends BaseRepository {
       const newJob = await this.storage.writeRow(
         "Jobs",
         {
-          job_id: crypto2.randomUUID(),
+          job_id: crypto3.randomUUID(),
           tenant_id: context.tenantId,
           company_id: companyId,
           job_number: formattedJobNumber,
@@ -2769,7 +2782,7 @@ var AccountingRepository = class extends BaseRepository {
       });
       const vType = entry.voucherType || "JV";
       const nextJvNum = `${vType}-${(/* @__PURE__ */ new Date()).getFullYear()}-${String(existingJournals.total + 1).padStart(4, "0")}`;
-      const journalId = crypto2.randomUUID();
+      const journalId = crypto3.randomUUID();
       const savedJournal = await this.storage.writeRow(
         "JournalEntries",
         {
@@ -2791,7 +2804,7 @@ var AccountingRepository = class extends BaseRepository {
         context
       );
       const lineRows = entry.lines.map((l) => ({
-        line_id: crypto2.randomUUID(),
+        line_id: crypto3.randomUUID(),
         journal_id: journalId,
         account_id: l.accountId,
         debit: parseFloat(String(l.debit || 0)),
@@ -2907,7 +2920,7 @@ var AccountingRepository = class extends BaseRepository {
       throw new Error(`Account code ${data.account_code} already exists.`);
     }
     const created = await this.storage.writeRow("Accounts", {
-      account_id: crypto2.randomUUID(),
+      account_id: crypto3.randomUUID(),
       tenant_id: context.tenantId,
       company_id: context.companyId,
       account_code: data.account_code,
@@ -2931,7 +2944,7 @@ var AccountingRepository = class extends BaseRepository {
     this.assertContext(context);
     const created = await this.storage.writeRow("BankAccounts", {
       ...data,
-      bank_account_id: crypto2.randomUUID(),
+      bank_account_id: crypto3.randomUUID(),
       tenant_id: context.tenantId,
       company_id: context.companyId
     }, context);
@@ -2952,7 +2965,7 @@ var AccountingRepository = class extends BaseRepository {
     this.assertContext(context);
     const created = await this.storage.writeRow("BankTransactions", {
       ...data,
-      bank_tx_id: crypto2.randomUUID(),
+      bank_tx_id: crypto3.randomUUID(),
       tenant_id: context.tenantId,
       company_id: context.companyId,
       is_reconciled: false
@@ -2978,7 +2991,7 @@ var AccountingRepository = class extends BaseRepository {
     this.assertContext(context);
     const created = await this.storage.writeRow("BankReconciliations", {
       ...data,
-      rec_id: crypto2.randomUUID(),
+      rec_id: crypto3.randomUUID(),
       tenant_id: context.tenantId,
       company_id: context.companyId,
       reconciled_date: data.reconciled_date || (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
@@ -3003,7 +3016,7 @@ var AccountingRepository = class extends BaseRepository {
     const receiptNum = data.receipt_number || `REC-${(/* @__PURE__ */ new Date()).getFullYear()}-${(count + 1).toString().padStart(4, "0")}`;
     const created = await this.storage.writeRow("Receipts", {
       ...data,
-      receipt_id: crypto2.randomUUID(),
+      receipt_id: crypto3.randomUUID(),
       tenant_id: context.tenantId,
       company_id: context.companyId,
       receipt_number: receiptNum,
@@ -3028,7 +3041,7 @@ var AccountingRepository = class extends BaseRepository {
     const paymentNum = data.payment_number || `PAY-${(/* @__PURE__ */ new Date()).getFullYear()}-${(count + 1).toString().padStart(4, "0")}`;
     const created = await this.storage.writeRow("Payments", {
       ...data,
-      payment_id: crypto2.randomUUID(),
+      payment_id: crypto3.randomUUID(),
       tenant_id: context.tenantId,
       company_id: context.companyId,
       payment_number: paymentNum,
@@ -3057,7 +3070,7 @@ var AccountingRepository = class extends BaseRepository {
     const vat = parseFloat(String(data.vat_amount || subtotal * 0.05));
     const created = await this.storage.writeRow("Quotations", {
       ...data,
-      quotation_id: crypto2.randomUUID(),
+      quotation_id: crypto3.randomUUID(),
       tenant_id: context.tenantId,
       company_id: context.companyId,
       quotation_no: quoteNum,
@@ -3086,7 +3099,7 @@ var AccountingRepository = class extends BaseRepository {
     const vat = parseFloat(String(data.tax_amount || subtotal * 0.05));
     const created = await this.storage.writeRow("PurchaseInvoices", {
       ...data,
-      purchase_invoice_id: crypto2.randomUUID(),
+      purchase_invoice_id: crypto3.randomUUID(),
       tenant_id: context.tenantId,
       company_id: context.companyId,
       subtotal,
@@ -3117,7 +3130,7 @@ var AccountingRepository = class extends BaseRepository {
     const vat = parseFloat(String(data.tax_amount || subtotal * 0.05));
     const created = await this.storage.writeRow("SalesInvoices", {
       ...data,
-      invoice_id: crypto2.randomUUID(),
+      invoice_id: crypto3.randomUUID(),
       tenant_id: context.tenantId,
       company_id: context.companyId,
       invoice_number: invNum,
@@ -3148,7 +3161,7 @@ var AccountingRepository = class extends BaseRepository {
     const dnNum = data.dn_number || `DN-${(/* @__PURE__ */ new Date()).getFullYear()}-${(count + 1).toString().padStart(3, "0")}`;
     const created = await this.storage.writeRow("DeliveryNotes", {
       ...data,
-      delivery_note_id: crypto2.randomUUID(),
+      delivery_note_id: crypto3.randomUUID(),
       tenant_id: context.tenantId,
       company_id: context.companyId,
       dn_number: dnNum,
@@ -3501,7 +3514,7 @@ var InventoryRepository = class extends BaseRepository {
       const tx = await this.storage.writeRow(
         "InventoryTransactions",
         {
-          transaction_id: crypto2.randomUUID(),
+          transaction_id: crypto3.randomUUID(),
           tenant_id: context.tenantId,
           company_id: context.companyId,
           item_id: movement.itemId,
@@ -3540,7 +3553,7 @@ var ProcurementRepository = class extends BaseRepository {
     const created = await this.storage.writeRow(
       "PurchaseOrders",
       {
-        po_id: crypto2.randomUUID(),
+        po_id: crypto3.randomUUID(),
         tenant_id: context.tenantId,
         company_id: context.companyId,
         po_number: poNumber,
@@ -3575,7 +3588,7 @@ var ProcurementRepository = class extends BaseRepository {
     const created = await this.storage.writeRow(
       "PurchaseRequests",
       {
-        pr_id: crypto2.randomUUID(),
+        pr_id: crypto3.randomUUID(),
         tenant_id: context.tenantId,
         company_id: context.companyId,
         pr_no: prNumber,
@@ -3596,7 +3609,7 @@ var ProcurementRepository = class extends BaseRepository {
     this.logAudit(context, "CREATE_PR", "PurchaseRequests", created.pr_id, null, created);
     if (parseFloat(data.estimated_amount || 0) >= 1e4) {
       await this.storage.writeRow("ApprovalRequests", {
-        request_id: crypto2.randomUUID(),
+        request_id: crypto3.randomUUID(),
         tenant_id: context.tenantId,
         company_id: context.companyId,
         module: "PURCHASE_REQUEST",
@@ -3684,7 +3697,7 @@ var ProcurementRepository = class extends BaseRepository {
     const created = await this.storage.writeRow(
       "RFQs",
       {
-        rfq_id: crypto2.randomUUID(),
+        rfq_id: crypto3.randomUUID(),
         tenant_id: context.tenantId,
         company_id: context.companyId,
         rfq_no: rfqNo,
@@ -3713,7 +3726,7 @@ var ProcurementRepository = class extends BaseRepository {
     const created = await this.storage.writeRow(
       "SupplierQuotations",
       {
-        supplier_quotation_id: crypto2.randomUUID(),
+        supplier_quotation_id: crypto3.randomUUID(),
         tenant_id: context.tenantId,
         company_id: context.companyId,
         rfq_id: data.rfq_id,
@@ -3752,7 +3765,7 @@ var ProcurementRepository = class extends BaseRepository {
     const subtotal = parseFloat(quote.total_quoted || 0);
     const vat = Math.round(subtotal * 0.05 * 100) / 100;
     const po = await this.storage.writeRow("PurchaseOrders", {
-      po_id: crypto2.randomUUID(),
+      po_id: crypto3.randomUUID(),
       tenant_id: context.tenantId,
       company_id: context.companyId,
       po_number: poNumber,
@@ -3785,7 +3798,7 @@ var ProcurementRepository = class extends BaseRepository {
     const created = await this.storage.writeRow(
       "GoodsReceipts",
       {
-        grn_id: crypto2.randomUUID(),
+        grn_id: crypto3.randomUUID(),
         tenant_id: context.tenantId,
         company_id: context.companyId,
         grn_number: grnNo,
@@ -3937,7 +3950,7 @@ var ApprovalRepository = class extends BaseRepository {
     await this.storage.writeRow(
       "ApprovalActions",
       {
-        action_id: crypto2.randomUUID(),
+        action_id: crypto3.randomUUID(),
         request_id: requestId,
         action_by_user_id: context.userId,
         action,
@@ -4248,7 +4261,7 @@ var HRRepository = class extends BaseRepository {
       const created = await this.storage.writeRow(
         "Attendance",
         {
-          attendance_id: crypto2.randomUUID(),
+          attendance_id: crypto3.randomUUID(),
           tenant_id: context.tenantId,
           company_id: context.companyId,
           employee_id: employeeId,
@@ -4340,7 +4353,7 @@ var JobEstimationRepository = class extends BaseRepository {
     const markupMarginPercent = totalJobCost > 0 ? Number(((contractPrice - totalJobCost) / totalJobCost * 100).toFixed(1)) : 25;
     const grossProfit = contractPrice - totalJobCost;
     const record = {
-      estimation_id: crypto2.randomUUID(),
+      estimation_id: crypto3.randomUUID(),
       tenant_id: context.tenantId,
       company_id: context.companyId || "comp-cemcon-mech-01",
       estimation_no: estNo,
@@ -4855,7 +4868,24 @@ app.get("/api/employees", async (req, res) => {
 app.post("/api/employees", async (req, res) => {
   try {
     const context = getSecurityContext(req);
-    const { employee_no, full_name, designation, department_id, email, phone, status = "ACTIVE", joining_date } = req.body;
+    const {
+      employee_no,
+      full_name,
+      designation,
+      department_id,
+      email,
+      phone,
+      status = "ACTIVE",
+      joining_date,
+      cancellation_date,
+      passport_no,
+      passport_issue_date,
+      passport_expiry_date,
+      passport_country,
+      passport_place_of_issue,
+      nationality,
+      profile_photo
+    } = req.body;
     if (!employee_no || !full_name || !designation || !department_id || !email) {
       return res.status(400).json({ error: "Missing required employee fields: employee_no, full_name, designation, department_id, email." });
     }
@@ -4869,11 +4899,39 @@ app.post("/api/employees", async (req, res) => {
         phone: phone || "",
         status,
         joining_date: joining_date || (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+        cancellation_date: cancellation_date || (status === "INACTIVE" || status === "TERMINATED" ? (/* @__PURE__ */ new Date()).toISOString().split("T")[0] : null),
+        passport_no: passport_no || "",
+        passport_issue_date: passport_issue_date || null,
+        passport_expiry_date: passport_expiry_date || null,
+        passport_country: passport_country || nationality || "",
+        passport_place_of_issue: passport_place_of_issue || "",
+        nationality: nationality || passport_country || "",
+        profile_photo: profile_photo || "",
         tenant_id: context.tenantId,
         company_id: context.companyId
       },
       context
     );
+    if (passport_no && passport_expiry_date) {
+      try {
+        await hrRepo.createEmployeeDocument(
+          {
+            doc_id: crypto.randomUUID(),
+            tenant_id: context.tenantId,
+            company_id: context.companyId,
+            employee_id: created.employee_id,
+            doc_type: "PASSPORT",
+            doc_number: passport_no,
+            issue_date: passport_issue_date || created.joining_date,
+            expiry_date: passport_expiry_date,
+            status: "VALID"
+          },
+          context
+        );
+      } catch (docErr) {
+        console.warn("Could not auto-generate passport doc record:", docErr);
+      }
+    }
     res.status(201).json(created);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -4882,8 +4940,61 @@ app.post("/api/employees", async (req, res) => {
 app.patch("/api/employees/:id", async (req, res) => {
   try {
     const context = getSecurityContext(req);
-    const updated = await employeeRepo.updateEmployee(req.params.id, req.body, context);
+    const updates = { ...req.body };
+    if (updates.status === "INACTIVE" || updates.status === "TERMINATED") {
+      if (!updates.cancellation_date) {
+        updates.cancellation_date = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+      }
+    } else if (updates.status === "ACTIVE") {
+      updates.cancellation_date = null;
+    }
+    const updated = await employeeRepo.updateEmployee(req.params.id, updates, context);
+    if (updates.passport_no && updates.passport_expiry_date) {
+      try {
+        const existingDocs = await hrRepo.listEmployeeDocuments(context, {
+          where: { employee_id: req.params.id, doc_type: "PASSPORT" }
+        });
+        if (existingDocs.data && existingDocs.data.length > 0) {
+          await globalStorageAdapter.updateRow(
+            "EmployeeDocuments",
+            existingDocs.data[0].doc_id,
+            {
+              doc_number: updates.passport_no,
+              expiry_date: updates.passport_expiry_date,
+              issue_date: updates.passport_issue_date || existingDocs.data[0].issue_date
+            },
+            context
+          );
+        } else {
+          await hrRepo.createEmployeeDocument(
+            {
+              doc_id: crypto.randomUUID(),
+              tenant_id: context.tenantId,
+              company_id: context.companyId,
+              employee_id: req.params.id,
+              doc_type: "PASSPORT",
+              doc_number: updates.passport_no,
+              issue_date: updates.passport_issue_date || (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+              expiry_date: updates.passport_expiry_date,
+              status: "VALID"
+            },
+            context
+          );
+        }
+      } catch (err) {
+        console.warn("Could not sync passport document:", err);
+      }
+    }
     res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.delete("/api/employees/:id", async (req, res) => {
+  try {
+    const context = getSecurityContext(req);
+    await employeeRepo.deleteEmployee(req.params.id, context);
+    res.json({ success: true, deleted: req.params.id });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
