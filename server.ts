@@ -636,6 +636,30 @@ app.post('/api/hr/attendance', async (req: Request, res: Response) => {
   }
 });
 
+app.post('/api/hr/attendance/mark', async (req: Request, res: Response) => {
+  try {
+    const context = getSecurityContext(req);
+    const result = await hrRepo.markAttendance(req.body, context);
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/hr/attendance/bulk', async (req: Request, res: Response) => {
+  try {
+    const context = getSecurityContext(req);
+    const { items } = req.body;
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ error: 'items must be an array' });
+    }
+    const results = await hrRepo.batchMarkAttendance(items, context);
+    res.json({ success: true, count: results.length, data: results });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/hr/timesheets', async (req: Request, res: Response) => {
   try {
     const context = getSecurityContext(req);

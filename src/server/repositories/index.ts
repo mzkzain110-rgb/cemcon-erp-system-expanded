@@ -2164,6 +2164,102 @@ export class HRRepository extends BaseRepository {
     return created;
   }
 
+  async markAttendance(
+    data: {
+      employee_id?: string;
+      employeeId?: string;
+      date?: string;
+      status: string;
+      trade?: string;
+      shift_hours?: number;
+      ot_hours?: number;
+      otHours?: number;
+      notes?: string;
+    },
+    context: SecurityContext
+  ) {
+    this.assertContext(context);
+    const employeeId = data.employee_id || data.employeeId;
+    if (!employeeId) {
+      throw new Error('employee_id is required');
+    }
+    const date = data.date || new Date().toISOString().split('T')[0];
+    const rawStatus = (data.status || 'P').toUpperCase();
+    const code = rawStatus.startsWith('P') ? 'P' : rawStatus.startsWith('A') ? 'A' : 'V';
+    const shiftHours = code === 'P' ? 8 : code === 'V' ? 8 : 0;
+    const otHours = Math.max(0, parseFloat(String(data.ot_hours ?? data.otHours ?? 0)));
+
+    const existing = await this.storage.readTab('Attendance', {
+      tenantId: context.tenantId,
+      companyId: context.companyId,
+      where: {
+        employee_id: employeeId,
+        date: date,
+      },
+    });
+
+    if (existing.data && existing.data.length > 0) {
+      const rec = existing.data[0];
+      const updated = await this.storage.updateRow(
+        'Attendance',
+        rec.attendance_id,
+        {
+          status: code,
+          code,
+          trade: data.trade !== undefined ? data.trade : rec.trade || '',
+          shift_hours: shiftHours,
+          ot_hours: otHours,
+          notes: data.notes || '',
+        },
+        context
+      );
+      return updated;
+    } else {
+      const created = await this.storage.writeRow(
+        'Attendance',
+        {
+          attendance_id: crypto.randomUUID(),
+          tenant_id: context.tenantId,
+          company_id: context.companyId,
+          employee_id: employeeId,
+          date: date,
+          status: code,
+          code,
+          trade: data.trade || '',
+          shift_hours: shiftHours,
+          ot_hours: otHours,
+          notes: data.notes || '',
+        },
+        context
+      );
+      return created;
+    }
+  }
+
+  async batchMarkAttendance(
+    items: Array<{
+      employee_id?: string;
+      employeeId?: string;
+      date?: string;
+      status: string;
+      trade?: string;
+      shift_hours?: number;
+      ot_hours?: number;
+      otHours?: number;
+      notes?: string;
+    }>,
+    context: SecurityContext
+  ) {
+    this.assertContext(context);
+    const results = [];
+    for (const item of items) {
+      const res = await this.markAttendance(item, context);
+      results.push(res);
+    }
+    this.logAudit(context, 'BATCH_MARK_ATTENDANCE', 'Attendance', `BATCH-${Date.now()}`, null, { count: items.length });
+    return results;
+  }
+
   // Timesheets
   async listTimesheets(context: SecurityContext, query?: StorageQuery) {
     this.assertContext(context);

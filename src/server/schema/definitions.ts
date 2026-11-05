@@ -176,7 +176,7 @@ export const ERP_TAB_SCHEMAS: Record<string, TabSchema> = {
   },
   Attendance: {
     tabName: 'Attendance',
-    description: 'Daily clock-in and attendance logs',
+    description: 'Daily workforce attendance logs (P=Present 8h, A=Absent 0h, V=Vacation, Trade & OT)',
     category: 'hr',
     columns: [
       { name: 'attendance_id', type: 'uuid', required: true, primaryKey: true },
@@ -184,9 +184,14 @@ export const ERP_TAB_SCHEMAS: Record<string, TabSchema> = {
       { name: 'company_id', type: 'uuid', required: true },
       { name: 'employee_id', type: 'uuid', required: true },
       { name: 'date', type: 'date-iso', required: true },
-      { name: 'status', type: 'string', required: true, allowedValues: ['PRESENT', 'ABSENT', 'LATE', 'HALF_DAY'] },
+      { name: 'status', type: 'string', required: true, allowedValues: ['P', 'A', 'V', 'PRESENT', 'ABSENT', 'VACATION', 'LATE', 'HALF_DAY'] },
+      { name: 'code', type: 'string', required: false },
+      { name: 'trade', type: 'string', required: false },
+      { name: 'shift_hours', type: 'number', required: false },
+      { name: 'ot_hours', type: 'number', required: false },
       { name: 'check_in', type: 'string', required: false },
       { name: 'check_out', type: 'string', required: false },
+      { name: 'notes', type: 'string', required: false },
     ]
   },
   LeaveRequests: {

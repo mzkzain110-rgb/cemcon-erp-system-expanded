@@ -51,6 +51,7 @@ import { CEMCON_COMPANIES } from './components/hr/HRPrintableForms';
 import { exportJobOrderPdf } from './utils/corporatePdfGenerator';
 import { FinanceModule } from './components/finance/FinanceModule';
 import { ProcurementModule } from './components/procurement/ProcurementModule';
+import { MonthlyAttendanceModule } from './components/hr/MonthlyAttendanceModule';
 
 interface SessionData {
   session: {
@@ -122,7 +123,7 @@ async function safeFetchJson<T = any>(url: string, init?: RequestInit): Promise<
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'departments' | 'jobs' | 'estimations' | 'accounting' | 'procurement' | 'inventory' | 'approvals' | 'sheets' | 'tests' | 'migration'
+    'overview' | 'departments' | 'attendance' | 'jobs' | 'estimations' | 'accounting' | 'procurement' | 'inventory' | 'approvals' | 'sheets' | 'tests' | 'migration'
   >('overview');
 
   const [session, setSession] = useState<SessionData | null>(null);
@@ -130,9 +131,8 @@ export default function App() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const isTabRestricted =
-    (session?.session?.roleCode === 'SALES_HEAD' || session?.session?.roleCode === 'HR_MANAGER') &&
-    activeTab !== 'departments' &&
-    activeTab !== 'overview';
+    (session?.session?.roleCode === 'SALES_HEAD' && activeTab !== 'departments' && activeTab !== 'overview') ||
+    (session?.session?.roleCode === 'HR_MANAGER' && activeTab !== 'departments' && activeTab !== 'attendance' && activeTab !== 'overview');
 
   // Departments & Personnel state
   const [departments, setDepartments] = useState<any[]>([]);
@@ -710,6 +710,7 @@ export default function App() {
           {[
             { id: 'overview', label: 'Executive Dashboard', icon: TrendingUp },
             { id: 'departments', label: 'Departments & HR', icon: Users, badge: `${departments.length} Depts` },
+            { id: 'attendance', label: 'Workforce Attendance (30 Days)', icon: Clock, badge: 'P / A / V' },
             { id: 'jobs', label: 'Job Numbering Engine', icon: Briefcase, badge: jobs.length },
             { id: 'estimations', label: 'Job Estimation', icon: Calculator, badge: 'Costing' },
             { id: 'accounting', label: 'Accounts & Finance', icon: ArrowRightLeft, badge: '18 Modules' },
@@ -725,7 +726,7 @@ export default function App() {
             const role = session?.session?.roleCode;
             const isRestrictedForUser =
               (role === 'SALES_HEAD' && item.id !== 'departments' && item.id !== 'overview') ||
-              (role === 'HR_MANAGER' && item.id !== 'departments' && item.id !== 'overview');
+              (role === 'HR_MANAGER' && item.id !== 'departments' && item.id !== 'attendance' && item.id !== 'overview');
 
             return (
               <button
@@ -1696,6 +1697,22 @@ export default function App() {
                 </div>
               )}
             </div>
+          )}
+
+          {/* VIEW 1B: WORKFORCE ATTENDANCE & 30-DAY MUSTER ROLL */}
+          {activeTab === 'attendance' && (
+            <MonthlyAttendanceModule
+              session={session}
+              departments={departments}
+              employees={employees}
+              onRefreshEmployees={() => {
+                fetch('/api/employees')
+                  .then((r) => r.json())
+                  .then((d) => setEmployees(d.data || []))
+                  .catch(console.error);
+              }}
+              triggerGoogleSheetsSync={triggerGoogleSheetsSync}
+            />
           )}
 
           {/* VIEW 2: JOB NUMBERING ENGINE */}

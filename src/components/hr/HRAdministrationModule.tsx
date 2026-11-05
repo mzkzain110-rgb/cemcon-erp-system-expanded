@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { HRPrintableForms } from './HRPrintableForms';
 import { DocumentExpiryModal, ExpiryItem } from './DocumentExpiryModal';
+import { MonthlyAttendanceModule } from './MonthlyAttendanceModule';
 
 interface HRAdministrationModuleProps {
   session: any;
@@ -1046,6 +1047,15 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
       {/* ============================================================ */}
       {activeSubTab === 'attendance' && (
         <div className="space-y-6">
+          {/* Complete 30-Day Workforce Attendance & Muster Roll Suite */}
+          <MonthlyAttendanceModule
+            session={session}
+            departments={departments}
+            employees={employees}
+            onRefreshEmployees={onRefreshEmployees}
+            triggerGoogleSheetsSync={triggerGoogleSheetsSync}
+          />
+
           {/* Shifts Management Overview */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
