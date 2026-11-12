@@ -43,6 +43,7 @@ import {
   Eye,
   ShoppingCart,
   Calculator,
+  Banknote,
 } from 'lucide-react';
 import { HRAdministrationModule } from './components/hr/HRAdministrationModule';
 import { JobOrderModal } from './components/jobs/JobOrderModal';
@@ -52,6 +53,7 @@ import { exportJobOrderPdf } from './utils/corporatePdfGenerator';
 import { FinanceModule } from './components/finance/FinanceModule';
 import { ProcurementModule } from './components/procurement/ProcurementModule';
 import { MonthlyAttendanceModule } from './components/hr/MonthlyAttendanceModule';
+import { SalaryModule } from './components/salary/SalaryModule';
 
 interface SessionData {
   session: {
@@ -123,7 +125,7 @@ async function safeFetchJson<T = any>(url: string, init?: RequestInit): Promise<
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'departments' | 'attendance' | 'jobs' | 'estimations' | 'accounting' | 'procurement' | 'inventory' | 'approvals' | 'sheets' | 'tests' | 'migration'
+    'overview' | 'departments' | 'attendance' | 'salary' | 'jobs' | 'estimations' | 'accounting' | 'procurement' | 'inventory' | 'approvals' | 'sheets' | 'tests' | 'migration'
   >('overview');
 
   const [session, setSession] = useState<SessionData | null>(null);
@@ -132,7 +134,7 @@ export default function App() {
 
   const isTabRestricted =
     (session?.session?.roleCode === 'SALES_HEAD' && activeTab !== 'departments' && activeTab !== 'overview') ||
-    (session?.session?.roleCode === 'HR_MANAGER' && activeTab !== 'departments' && activeTab !== 'attendance' && activeTab !== 'overview');
+    (session?.session?.roleCode === 'HR_MANAGER' && activeTab !== 'departments' && activeTab !== 'attendance' && activeTab !== 'salary' && activeTab !== 'overview');
 
   // Departments & Personnel state
   const [departments, setDepartments] = useState<any[]>([]);
@@ -754,6 +756,7 @@ export default function App() {
             { id: 'overview', label: 'Executive Dashboard', icon: TrendingUp },
             { id: 'departments', label: 'Departments & HR', icon: Users, badge: `${departments.length} Depts` },
             { id: 'attendance', label: 'Workforce Attendance (30 Days)', icon: Clock, badge: 'P / A / V' },
+            { id: 'salary', label: 'Salary & Payroll Module', icon: Banknote, badge: 'Auto-Calculated' },
             { id: 'jobs', label: 'Job Numbering Engine', icon: Briefcase, badge: jobs.length },
             { id: 'estimations', label: 'Job Estimation', icon: Calculator, badge: 'Costing' },
             { id: 'accounting', label: 'Accounts & Finance', icon: ArrowRightLeft, badge: '18 Modules' },
@@ -769,7 +772,7 @@ export default function App() {
             const role = session?.session?.roleCode;
             const isRestrictedForUser =
               (role === 'SALES_HEAD' && item.id !== 'departments' && item.id !== 'overview') ||
-              (role === 'HR_MANAGER' && item.id !== 'departments' && item.id !== 'attendance' && item.id !== 'overview');
+              (role === 'HR_MANAGER' && item.id !== 'departments' && item.id !== 'attendance' && item.id !== 'salary' && item.id !== 'overview');
 
             return (
               <button
@@ -1888,6 +1891,24 @@ export default function App() {
                   .catch(console.error);
               }}
               triggerGoogleSheetsSync={triggerGoogleSheetsSync}
+              onOpenSalary={() => setActiveTab('salary')}
+            />
+          )}
+
+          {/* VIEW 1C: SALARY & PAYROLL MODULE (AUTO-CALCULATED FROM ATTENDANCE) */}
+          {activeTab === 'salary' && (
+            <SalaryModule
+              session={session}
+              departments={departments}
+              employees={employees}
+              onRefreshEmployees={() => {
+                fetch('/api/employees')
+                  .then((r) => r.json())
+                  .then((d) => setEmployees(d.data || []))
+                  .catch(console.error);
+              }}
+              triggerGoogleSheetsSync={triggerGoogleSheetsSync}
+              onOpenAttendance={() => setActiveTab('attendance')}
             />
           )}
 

@@ -65,9 +65,10 @@ interface FinanceModuleProps {
   activeCompany: CemconCompanyInfo;
   tenantName: string;
   userRole?: string;
+  jobs?: any[];
 }
 
-export function FinanceModule({ activeCompany, tenantName, userRole }: FinanceModuleProps) {
+export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: FinanceModuleProps) {
   const [activeMenu, setActiveMenu] = useState<FinanceMenuOption>('pnl');
   const [loading, setLoading] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -93,22 +94,26 @@ export function FinanceModule({ activeCompany, tenantName, userRole }: FinanceMo
   const [balanceSheetData, setBalanceSheetData] = useState<any>(null);
   const [cashFlowData, setCashFlowData] = useState<any>(null);
   const [financialMetrics, setFinancialMetrics] = useState<any>(null);
+  const [jobsList, setJobsList] = useState<any[]>(jobs || []);
 
   // Filters & Selected states
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedVoucherType, setSelectedVoucherType] = useState<string>('ALL');
+  const [selectedJobFilter, setSelectedJobFilter] = useState<string>('ALL');
   const [selectedGlAccountId, setSelectedGlAccountId] = useState<string>('');
   const [selectedPartyType, setSelectedPartyType] = useState<'customers' | 'suppliers'>('customers');
   const [selectedReceiptPaymentTab, setSelectedReceiptPaymentTab] = useState<'receipts' | 'payments'>('receipts');
   const [selectedAgingTab, setSelectedAgingTab] = useState<'ar' | 'ap'>('ar');
 
-  // Modals
+  // Modals & Jobwise Journal Entry State
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
   const [newVoucherType, setNewVoucherType] = useState<'PV' | 'RV' | 'JV' | 'EV' | 'AV'>('JV');
   const [newVoucherMemo, setNewVoucherMemo] = useState('');
-  const [newVoucherLines, setNewVoucherLines] = useState<Array<{ accountId: string; debit: number; credit: number; lineMemo: string }>>([
-    { accountId: '', debit: 0, credit: 0, lineMemo: '' },
-    { accountId: '', debit: 0, credit: 0, lineMemo: '' },
+  const [isJobwiseEntry, setIsJobwiseEntry] = useState(false);
+  const [selectedJobId, setSelectedJobId] = useState('');
+  const [newVoucherLines, setNewVoucherLines] = useState<Array<{ accountId: string; debit: number; credit: number; lineMemo: string; jobId?: string; jobNumber?: string }>>([
+    { accountId: '', debit: 0, credit: 0, lineMemo: '', jobId: '', jobNumber: '' },
+    { accountId: '', debit: 0, credit: 0, lineMemo: '', jobId: '', jobNumber: '' },
   ]);
   const [voucherError, setVoucherError] = useState<string | null>(null);
   const [newVoucherDate, setNewVoucherDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -157,6 +162,8 @@ export function FinanceModule({ activeCompany, tenantName, userRole }: FinanceMo
         { accountId: '', debit: 0, credit: 0, lineMemo: '' },
       ]);
     }
+    setIsJobwiseEntry(false);
+    setSelectedJobId('');
     setIsVoucherModalOpen(true);
   };
 
@@ -208,6 +215,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole }: FinanceMo
           bsRes,
           cfRes,
           fmRes,
+          jobsRes,
         ] = await Promise.all([
           fetch('/api/accounting/accounts').then((r) => r.json()),
           fetch('/api/banking/accounts').then((r) => r.json()),
@@ -229,6 +237,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole }: FinanceMo
           fetch('/api/accounting/balance-sheet').then((r) => r.json()),
           fetch('/api/accounting/cash-flow').then((r) => r.json()),
           fetch('/api/accounting/financial-metrics').then((r) => r.json()),
+          fetch('/api/jobs').then((r) => r.json()).catch(() => ({ data: [] })),
         ]);
 
         if (accountsRes.data) setAccounts(accountsRes.data);
@@ -251,6 +260,8 @@ export function FinanceModule({ activeCompany, tenantName, userRole }: FinanceMo
         if (bsRes.totalAssets !== undefined) setBalanceSheetData(bsRes);
         if (cfRes.operating) setCashFlowData(cfRes);
         if (fmRes.ratios) setFinancialMetrics(fmRes);
+        if (jobsRes?.data) setJobsList(jobsRes.data);
+        else if (Array.isArray(jobsRes)) setJobsList(jobsRes);
       } catch (err) {
         console.error('Error fetching finance data:', err);
       } finally {
@@ -353,6 +364,9 @@ export function FinanceModule({ activeCompany, tenantName, userRole }: FinanceMo
       return;
     }
 
+    const chosenJob = isJobwiseEntry && selectedJobId ? jobsList.find((j) => j.job_id === selectedJobId) : null;
+    const headerJobNumber = chosenJob ? (chosenJob.job_number || chosenJob.jobNumber) : undefined;
+
     try {
       const res = await fetch('/api/accounting/post-journal', {
         method: 'POST',
@@ -362,19 +376,36 @@ export function FinanceModule({ activeCompany, tenantName, userRole }: FinanceMo
           entryDate: newVoucherDate || new Date().toISOString().split('T')[0],
           memo: newVoucherMemo,
           voucherType: newVoucherType,
-          lines: newVoucherLines,
+          jobId: isJobwiseEntry ? selectedJobId || undefined : undefined,
+          jobNumber: headerJobNumber,
+          lines: newVoucherLines.map((l) => {
+            const lineJob = l.jobId ? jobsList.find((j) => j.job_id === l.jobId) : null;
+            const lineJobNum = lineJob ? (lineJob.job_number || lineJob.jobNumber) : (l.jobNumber || headerJobNumber);
+            return {
+              accountId: l.accountId,
+              debit: l.debit,
+              credit: l.credit,
+              lineMemo: l.lineMemo,
+              jobId: l.jobId || (isJobwiseEntry ? selectedJobId : undefined) || undefined,
+              jobNumber: lineJobNum || undefined,
+            };
+          }),
         }),
       });
 
       if (res.ok) {
         setIsVoucherModalOpen(false);
         setNewVoucherMemo('');
+        setIsJobwiseEntry(false);
+        setSelectedJobId('');
         setNewVoucherLines([
-          { accountId: '', debit: 0, credit: 0, lineMemo: '' },
-          { accountId: '', debit: 0, credit: 0, lineMemo: '' },
+          { accountId: '', debit: 0, credit: 0, lineMemo: '', jobId: '', jobNumber: '' },
+          { accountId: '', debit: 0, credit: 0, lineMemo: '', jobId: '', jobNumber: '' },
         ]);
         showToast(
-          newVoucherType === 'JV'
+          isJobwiseEntry && headerJobNumber
+            ? `${newVoucherType} voucher posted for Job ${headerJobNumber} to General Ledger!`
+            : newVoucherType === 'JV'
             ? 'Journal entry successfully posted to General Ledger!'
             : `${newVoucherType} voucher posted successfully to General Ledger!`
         );

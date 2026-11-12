@@ -29,6 +29,7 @@ import {
   AuditRepository,
   HRRepository,
   JobEstimationRepository,
+  PayrollRepository,
 } from './src/server/repositories/index.js';
 import { PostgresMigrationEngine } from './src/server/migration/postgresMigration.js';
 
@@ -75,6 +76,7 @@ const documentRepo = new DocumentRepository(globalStorageAdapter);
 const approvalRepo = new ApprovalRepository(globalStorageAdapter);
 const notificationRepo = new NotificationRepository(globalStorageAdapter);
 const auditRepo = new AuditRepository(globalStorageAdapter);
+const payrollRepo = new PayrollRepository(globalStorageAdapter);
 const migrationEngine = new PostgresMigrationEngine(globalStorageAdapter);
 
 const ENTERPRISE_USER_ROLES: Record<string, {
@@ -768,6 +770,94 @@ app.post('/api/hr/attendance/bulk', async (req: Request, res: Response) => {
   }
 });
 
+// ======================== SALARY & PAYROLL MODULE ========================
+// 1. Salary Structures (Compensation Packages)
+app.get('/api/payroll/structures', async (req: Request, res: Response) => {
+  try {
+    const context = getSecurityContext(req);
+    const result = await payrollRepo.listSalaryStructures(context);
+    res.json(result);
+  } catch (err: any) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+app.post('/api/payroll/structures', async (req: Request, res: Response) => {
+  try {
+    const context = getSecurityContext(req);
+    const result = await payrollRepo.upsertSalaryStructure(req.body, context);
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/payroll/structures/:id', async (req: Request, res: Response) => {
+  try {
+    const context = getSecurityContext(req);
+    await payrollRepo.deleteSalaryStructure(req.params.id, context);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 2. Monthly Payroll Records
+app.get('/api/payroll/records', async (req: Request, res: Response) => {
+  try {
+    const context = getSecurityContext(req);
+    const month = (req.query.month as string) || undefined;
+    const result = await payrollRepo.listPayroll(month, context);
+    res.json(result);
+  } catch (err: any) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+// 3. Generate Monthly Payroll from Attendance
+app.post('/api/payroll/generate', async (req: Request, res: Response) => {
+  try {
+    const context = getSecurityContext(req);
+    const { month, month_days } = req.body;
+    if (!month) {
+      return res.status(400).json({ error: 'month (YYYY-MM) is required' });
+    }
+    const result = await payrollRepo.generateMonthlyPayroll(
+      { month, month_days: Number(month_days) || 30 },
+      context
+    );
+    res.json({ success: true, count: result.length, data: result });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 4. Update individual payroll row (deductions, remarks, status)
+app.patch('/api/payroll/records/:id', async (req: Request, res: Response) => {
+  try {
+    const context = getSecurityContext(req);
+    const result = await payrollRepo.updatePayrollItem(req.params.id, req.body, context);
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 5. Batch update status (e.g. mark approved or paid)
+app.post('/api/payroll/batch-status', async (req: Request, res: Response) => {
+  try {
+    const context = getSecurityContext(req);
+    const { ids, status, payment_date } = req.body;
+    if (!Array.isArray(ids)) {
+      return res.status(400).json({ error: 'ids must be an array' });
+    }
+    const results = await payrollRepo.batchUpdatePayrollStatus(ids, status, payment_date, context);
+    res.json({ success: true, count: results.length, data: results });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/hr/timesheets', async (req: Request, res: Response) => {
   try {
     const context = getSecurityContext(req);
@@ -1029,7 +1119,7 @@ app.get('/api/accounting/journals/:id', async (req: Request, res: Response) => {
 app.post('/api/accounting/post-journal', async (req: Request, res: Response) => {
   try {
     const context = getSecurityContext(req);
-    const { idempotencyKey, entryDate, memo, lines } = req.body;
+    const { idempotencyKey, entryDate, memo, lines, voucherType, jobId, jobNumber, job_id, job_number } = req.body;
 
     if (!idempotencyKey || !entryDate || !memo || !lines) {
       return res.status(400).json({ error: 'idempotencyKey, entryDate, memo, and lines are required.' });
@@ -1041,6 +1131,9 @@ app.post('/api/accounting/post-journal', async (req: Request, res: Response) => 
         entryDate,
         memo,
         lines,
+        voucherType,
+        jobId: jobId || job_id,
+        jobNumber: jobNumber || job_number,
       },
       context
     );

@@ -407,6 +407,7 @@ export interface JournalLineInput {
   credit: number;
   lineMemo?: string;
   jobId?: string;
+  jobNumber?: string;
 }
 
 export class AccountingRepository extends BaseRepository {
@@ -452,6 +453,9 @@ export class AccountingRepository extends BaseRepository {
       entryDate: string;
       memo: string;
       lines: JournalLineInput[];
+      voucherType?: string;
+      jobId?: string;
+      jobNumber?: string;
     },
     context: SecurityContext
   ) {
@@ -517,6 +521,10 @@ export class AccountingRepository extends BaseRepository {
       const vType = (entry as any).voucherType || 'JV';
       const nextJvNum = `${vType}-${new Date().getFullYear()}-${String(existingJournals.total + 1).padStart(4, '0')}`;
 
+      // Resolve Job Info
+      const headerJobId = (entry as any).jobId || (entry as any).job_id || null;
+      const headerJobNumber = (entry as any).jobNumber || (entry as any).job_number || null;
+
       // 3. Write Journal Entry Header
       const journalId = crypto.randomUUID();
       const savedJournal = await this.storage.writeRow(
@@ -533,6 +541,8 @@ export class AccountingRepository extends BaseRepository {
           total_credit: totalCredit,
           is_balanced: true,
           voucher_type: vType,
+          job_id: headerJobId,
+          job_number: headerJobNumber,
           status: 'POSTED',
           reversal_of_id: null,
           created_by: context.userId,
@@ -541,14 +551,15 @@ export class AccountingRepository extends BaseRepository {
       );
 
       // 4. Batch Write Lines
-      const lineRows = entry.lines.map((l) => ({
+      const lineRows = entry.lines.map((l: any) => ({
         line_id: crypto.randomUUID(),
         journal_id: journalId,
-        account_id: l.accountId,
+        account_id: l.accountId || l.account_id,
         debit: parseFloat(String(l.debit || 0)),
         credit: parseFloat(String(l.credit || 0)),
-        line_memo: l.lineMemo || entry.memo,
-        job_id: l.jobId || null,
+        line_memo: l.lineMemo || l.line_memo || entry.memo,
+        job_id: l.jobId || l.job_id || headerJobId,
+        job_number: l.jobNumber || l.job_number || headerJobNumber,
       }));
 
       await this.storage.batchWrite('JournalLines', lineRows, context);
@@ -2474,3 +2485,394 @@ export class JobEstimationRepository extends BaseRepository {
     };
   }
 }
+
+// 23. PayrollRepository (Salary Structures & Attendance-Based Monthly Payroll)
+export class PayrollRepository extends BaseRepository {
+  // Salary Structures (Compensation Packages)
+  async listSalaryStructures(context: SecurityContext, query?: StorageQuery) {
+    this.assertContext(context);
+    return this.storage.readTab('SalaryStructures', {
+      ...query,
+      tenantId: context.tenantId,
+      companyId: context.companyId,
+      orderBy: { column: 'employee_no', ascending: true },
+    });
+  }
+
+  async getSalaryStructureByEmployee(employeeId: string, context: SecurityContext) {
+    this.assertContext(context);
+    const res = await this.storage.readTab('SalaryStructures', {
+      tenantId: context.tenantId,
+      companyId: context.companyId,
+      where: { employee_id: employeeId },
+    });
+    return (res.data && res.data.length > 0) ? res.data[0] : null;
+  }
+
+  async upsertSalaryStructure(data: Record<string, any>, context: SecurityContext) {
+    this.assertContext(context);
+    const employeeId = data.employee_id;
+    if (!employeeId) {
+      throw new Error('employee_id is required for salary structure');
+    }
+
+    const existing = await this.getSalaryStructureByEmployee(employeeId, context);
+
+    const baseRate = parseFloat(String(data.base_rate ?? 0));
+    const overtimeRate = parseFloat(String(data.overtime_rate ?? 0));
+    const housing = parseFloat(String(data.housing_allowance ?? 0));
+    const transport = parseFloat(String(data.transport_allowance ?? 0));
+    const otherAllowances = parseFloat(String(data.other_allowances ?? 0));
+
+    const payload = {
+      tenant_id: context.tenantId,
+      company_id: context.companyId,
+      employee_id: employeeId,
+      employee_no: data.employee_no || '',
+      employee_name: data.employee_name || '',
+      designation: data.designation || '',
+      salary_type: data.salary_type || 'FIXED', // 'FIXED', 'FIXED_PLUS_OT', 'PER_DAY', 'PER_HOUR'
+      base_rate: baseRate,
+      overtime_rate: overtimeRate,
+      housing_allowance: housing,
+      transport_allowance: transport,
+      other_allowances: otherAllowances,
+      currency: data.currency || 'AED',
+      payment_method: data.payment_method || 'BANK_WPS',
+      bank_name: data.bank_name || '',
+      iban: data.iban || '',
+      status: data.status || 'ACTIVE',
+      notes: data.notes || '',
+    };
+
+    if (existing) {
+      const updated = await this.storage.updateRow(
+        'SalaryStructures',
+        existing.structure_id,
+        payload,
+        context
+      );
+      this.logAudit(context, 'UPDATE_SALARY_STRUCTURE', 'SalaryStructures', existing.structure_id, existing, updated);
+      return updated;
+    } else {
+      const created = await this.storage.writeRow(
+        'SalaryStructures',
+        {
+          structure_id: crypto.randomUUID(),
+          ...payload,
+        },
+        context
+      );
+      this.logAudit(context, 'CREATE_SALARY_STRUCTURE', 'SalaryStructures', created.structure_id, null, created);
+      return created;
+    }
+  }
+
+  async deleteSalaryStructure(structureId: string, context: SecurityContext) {
+    this.assertContext(context);
+    const existing = await this.storage.getRowById('SalaryStructures', structureId, context);
+    if (!existing) throw new Error(`Salary structure ${structureId} not found`);
+    const success = await this.storage.deleteRow('SalaryStructures', structureId, context);
+    this.logAudit(context, 'DELETE_SALARY_STRUCTURE', 'SalaryStructures', structureId, existing, null);
+    return success;
+  }
+
+  // Monthly Payroll Runs
+  async listPayroll(month?: string, context?: SecurityContext, query?: StorageQuery) {
+    if (context) this.assertContext(context);
+    const where: Record<string, any> = {};
+    if (month) {
+      where.payroll_month = month;
+    }
+
+    return this.storage.readTab('MonthlyPayroll', {
+      ...query,
+      tenantId: context?.tenantId,
+      companyId: context?.companyId,
+      where,
+      orderBy: { column: 'employee_no', ascending: true },
+    });
+  }
+
+  /**
+   * Generates or updates monthly payroll directly from attendance records
+   * - month: e.g. "2026-11"
+   * - month_days: 30 or 31 (user-selectable)
+   */
+  async generateMonthlyPayroll(
+    params: { month: string; month_days?: number },
+    context: SecurityContext
+  ) {
+    this.assertContext(context);
+    const month = params.month;
+    const monthDays = Number(params.month_days) === 31 ? 31 : 30;
+
+    // 1. Fetch all employees
+    const empRes = await this.storage.readTab('Employees', {
+      tenantId: context.tenantId,
+      companyId: context.companyId,
+    });
+    const employees = empRes.data || [];
+
+    // 2. Fetch salary structures
+    const structRes = await this.storage.readTab('SalaryStructures', {
+      tenantId: context.tenantId,
+      companyId: context.companyId,
+    });
+    const structures = structRes.data || [];
+    const structMap = new Map<string, any>();
+    for (const s of structures) {
+      structMap.set(s.employee_id, s);
+    }
+
+    // 3. Fetch attendance records for this month
+    const attRes = await this.storage.readTab('Attendance', {
+      tenantId: context.tenantId,
+      companyId: context.companyId,
+    });
+    const allAttendance = attRes.data || [];
+    const monthAttendance = allAttendance.filter((a: any) =>
+      a.date && typeof a.date === 'string' && a.date.startsWith(month)
+    );
+
+    // Group attendance by employee_id
+    const empAttMap = new Map<string, any[]>();
+    for (const a of monthAttendance) {
+      if (!empAttMap.has(a.employee_id)) {
+        empAttMap.set(a.employee_id, []);
+      }
+      empAttMap.get(a.employee_id)!.push(a);
+    }
+
+    // 4. Fetch existing payroll records for this month
+    const existingPayrollRes = await this.storage.readTab('MonthlyPayroll', {
+      tenantId: context.tenantId,
+      companyId: context.companyId,
+      where: { payroll_month: month },
+    });
+    const existingMap = new Map<string, any>();
+    for (const p of existingPayrollRes.data || []) {
+      existingMap.set(p.employee_id, p);
+    }
+
+    const generatedRecords = [];
+
+    for (const emp of employees) {
+      // Check if employee is inactive and has no attendance
+      const records = empAttMap.get(emp.employee_id) || [];
+      if (emp.status === 'INACTIVE' && records.length === 0) {
+        continue;
+      }
+
+      // Tally attendance
+      let presentDays = 0;
+      let vacationDays = 0;
+      let absentDays = 0;
+      let normalShiftHours = 0;
+      let otHours = 0;
+      let empTrade = emp.designation || '';
+
+      for (const rec of records) {
+        const rawStatus = (rec.status || rec.code || 'P').toUpperCase();
+        const ot = Number(rec.ot_hours || 0);
+        otHours += ot;
+
+        if (rec.trade) empTrade = rec.trade;
+
+        if (rawStatus === 'P' || rawStatus === 'PRESENT') {
+          presentDays += 1;
+          normalShiftHours += Number(rec.shift_hours || 8);
+        } else if (rawStatus === 'V' || rawStatus === 'VACATION') {
+          vacationDays += 1;
+          normalShiftHours += Number(rec.shift_hours || 8);
+        } else if (rawStatus === 'A' || rawStatus === 'ABSENT') {
+          absentDays += 1;
+        }
+      }
+
+      const totalPaidHours = normalShiftHours + otHours;
+
+      // Salary structure configuration
+      const struct = structMap.get(emp.employee_id) || null;
+      const salaryType: 'FIXED' | 'FIXED_PLUS_OT' | 'PER_DAY' | 'PER_HOUR' =
+        (struct?.salary_type as any) ||
+        (emp.designation?.toLowerCase().includes('welder') ||
+         emp.designation?.toLowerCase().includes('fabricator')
+          ? 'FIXED_PLUS_OT'
+          : 'FIXED');
+
+      const baseRate = Number(struct?.base_rate || 0);
+      let overtimeRate = Number(struct?.overtime_rate || 0);
+      const housing = Number(struct?.housing_allowance || 0);
+      const transport = Number(struct?.transport_allowance || 0);
+      const otherAllow = Number(struct?.other_allowances || 0);
+      const allowancesTotal = housing + transport + otherAllow;
+
+      let basicSalaryEarned = 0;
+      let overtimePay = 0;
+      let absenceDeduction = 0;
+
+      // Existing other deductions preserved if already edited
+      const existingRecord = existingMap.get(emp.employee_id);
+      const otherDeductions = existingRecord ? Number(existingRecord.other_deductions || 0) : 0;
+
+      if (salaryType === 'FIXED') {
+        // Fix Salary: e.g. supervisors, office staff
+        // Monthly base rate. Deduct for absent days based on 30 or 31 days. Overtime is 0.
+        const dailyRate = monthDays > 0 ? baseRate / monthDays : 0;
+        absenceDeduction = Math.round(absentDays * dailyRate * 100) / 100;
+        basicSalaryEarned = Math.max(0, Math.round((baseRate - absenceDeduction) * 100) / 100);
+        overtimePay = 0; // Fixed staff do not receive overtime pay
+      } else if (salaryType === 'FIXED_PLUS_OT') {
+        // Fix + Overtime: e.g. Welder, fabricator
+        // Base monthly salary with absence deduction, plus overtime hours paid at OT hourly rate
+        const dailyRate = monthDays > 0 ? baseRate / monthDays : 0;
+        const hourlyBase = dailyRate / 8; // Normal shift is 8 hours
+        if (overtimeRate <= 0) {
+          // Default UAE standard 1.25x normal hourly rate
+          overtimeRate = Math.round(hourlyBase * 1.25 * 100) / 100;
+        }
+        absenceDeduction = Math.round(absentDays * dailyRate * 100) / 100;
+        basicSalaryEarned = Math.max(0, Math.round((baseRate - absenceDeduction) * 100) / 100);
+        overtimePay = Math.round(otHours * overtimeRate * 100) / 100;
+      } else if (salaryType === 'PER_DAY') {
+        // Per Day Salary: daily rate workers
+        // Paid for days worked (P) and paid vacation (V)
+        if (overtimeRate <= 0) {
+          overtimeRate = Math.round((baseRate / 8) * 1.25 * 100) / 100;
+        }
+        basicSalaryEarned = Math.round((presentDays + vacationDays) * baseRate * 100) / 100;
+        overtimePay = Math.round(otHours * overtimeRate * 100) / 100;
+        absenceDeduction = 0; // Not applicable since paid per day worked
+      } else if (salaryType === 'PER_HOUR') {
+        // Per Hour Salary: hourly rate workers
+        // Paid for normal shift hours + overtime hours
+        if (overtimeRate <= 0) {
+          overtimeRate = Math.round(baseRate * 1.25 * 100) / 100;
+        }
+        basicSalaryEarned = Math.round(normalShiftHours * baseRate * 100) / 100;
+        overtimePay = Math.round(otHours * overtimeRate * 100) / 100;
+        absenceDeduction = 0;
+      }
+
+      const grossSalary = Math.round((basicSalaryEarned + overtimePay + allowancesTotal) * 100) / 100;
+      const netSalary = Math.max(0, Math.round((grossSalary - otherDeductions) * 100) / 100);
+
+      const payrollRow = {
+        tenant_id: context.tenantId,
+        company_id: context.companyId,
+        payroll_month: month,
+        month_days: monthDays,
+        employee_id: emp.employee_id,
+        employee_no: emp.employee_no,
+        employee_name: emp.full_name,
+        designation: emp.designation,
+        trade: empTrade,
+        salary_type: salaryType,
+        present_days: presentDays,
+        vacation_days: vacationDays,
+        absent_days: absentDays,
+        normal_shift_hours: normalShiftHours,
+        overtime_hours: otHours,
+        total_paid_hours: totalPaidHours,
+        base_rate: baseRate,
+        overtime_rate: overtimeRate,
+        basic_salary_earned: basicSalaryEarned,
+        overtime_pay: overtimePay,
+        allowances_total: allowancesTotal,
+        gross_salary: grossSalary,
+        absence_deduction: absenceDeduction,
+        other_deductions: otherDeductions,
+        net_salary: netSalary,
+        currency: struct?.currency || 'AED',
+        status: existingRecord?.status || 'GENERATED',
+        payment_date: existingRecord?.payment_date || null,
+        remarks: existingRecord?.remarks || `Auto-calculated from ${month} attendance`,
+        created_at: existingRecord?.created_at || new Date().toISOString(),
+      };
+
+      if (existingRecord) {
+        const updated = await this.storage.updateRow(
+          'MonthlyPayroll',
+          existingRecord.payroll_id,
+          payrollRow,
+          context
+        );
+        generatedRecords.push(updated);
+      } else {
+        const created = await this.storage.writeRow(
+          'MonthlyPayroll',
+          {
+            payroll_id: crypto.randomUUID(),
+            ...payrollRow,
+          },
+          context
+        );
+        generatedRecords.push(created);
+      }
+    }
+
+    this.logAudit(context, 'GENERATE_MONTHLY_PAYROLL', 'MonthlyPayroll', `PAYROLL-${month}`, null, {
+      month,
+      monthDays,
+      count: generatedRecords.length,
+    });
+
+    return generatedRecords;
+  }
+
+  async updatePayrollItem(id: string, updates: Record<string, any>, context: SecurityContext) {
+    this.assertContext(context);
+    const existing = await this.storage.getRowById('MonthlyPayroll', id, context);
+    if (!existing) {
+      throw new Error(`Payroll record not found: ${id}`);
+    }
+
+    // Recompute gross and net if components changed
+    const basicEarned = updates.basic_salary_earned !== undefined ? Number(updates.basic_salary_earned) : Number(existing.basic_salary_earned || 0);
+    const overtimePay = updates.overtime_pay !== undefined ? Number(updates.overtime_pay) : Number(existing.overtime_pay || 0);
+    const allowances = updates.allowances_total !== undefined ? Number(updates.allowances_total) : Number(existing.allowances_total || 0);
+    const deductions = updates.other_deductions !== undefined ? Number(updates.other_deductions) : Number(existing.other_deductions || 0);
+
+    const grossSalary = Math.round((basicEarned + overtimePay + allowances) * 100) / 100;
+    const netSalary = Math.max(0, Math.round((grossSalary - deductions) * 100) / 100);
+
+    const updated = await this.storage.updateRow(
+      'MonthlyPayroll',
+      id,
+      {
+        ...updates,
+        basic_salary_earned: basicEarned,
+        overtime_pay: overtimePay,
+        allowances_total: allowances,
+        gross_salary: grossSalary,
+        other_deductions: deductions,
+        net_salary: netSalary,
+      },
+      context
+    );
+
+    this.logAudit(context, 'UPDATE_PAYROLL_ITEM', 'MonthlyPayroll', id, existing, updated);
+    return updated;
+  }
+
+  async batchUpdatePayrollStatus(
+    ids: string[],
+    status: string,
+    paymentDate?: string,
+    context?: SecurityContext
+  ) {
+    if (context) this.assertContext(context);
+    const results = [];
+    for (const id of ids) {
+      const updates: Record<string, any> = { status };
+      if (paymentDate) {
+        updates.payment_date = paymentDate;
+      }
+      const updated = await this.storage.updateRow('MonthlyPayroll', id, updates, context!);
+      results.push(updated);
+    }
+    return results;
+  }
+}
+

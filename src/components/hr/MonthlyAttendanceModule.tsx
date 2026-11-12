@@ -21,6 +21,7 @@ import {
   ChevronDown,
   Layers,
   FileSpreadsheet,
+  Banknote,
 } from 'lucide-react';
 
 interface AttendanceRecord {
@@ -41,6 +42,7 @@ interface MonthlyAttendanceModuleProps {
   employees: any[];
   onRefreshEmployees?: () => void;
   triggerGoogleSheetsSync?: () => void;
+  onOpenSalary?: () => void;
 }
 
 export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = ({
@@ -48,6 +50,7 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
   departments,
   employees,
   triggerGoogleSheetsSync,
+  onOpenSalary,
 }) => {
   // Date State: Year & Month
   const today = new Date();
@@ -511,6 +514,17 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
             <Printer className="h-4 w-4 text-slate-400" />
             Print Muster Roll
           </button>
+
+          {onOpenSalary && (
+            <button
+              onClick={onOpenSalary}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 text-xs font-semibold transition"
+              title="Calculate monthly salary from this attendance sheet"
+            >
+              <Banknote className="h-4 w-4 text-blue-400" />
+              Salary & Payroll Module →
+            </button>
+          )}
         </div>
       </div>
 
