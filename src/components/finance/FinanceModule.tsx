@@ -189,6 +189,12 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
     setTimeout(() => setToastMsg(null), 4000);
   };
 
+  useEffect(() => {
+    if (jobs && jobs.length > 0) {
+      setJobsList(jobs);
+    }
+  }, [jobs]);
+
   // Load Financial Data
   useEffect(() => {
     const fetchFinanceData = async () => {
@@ -366,6 +372,11 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
 
     const chosenJob = isJobwiseEntry && selectedJobId ? jobsList.find((j) => j.job_id === selectedJobId) : null;
     const headerJobNumber = chosenJob ? (chosenJob.job_number || chosenJob.jobNumber) : undefined;
+
+    if (isJobwiseEntry && !selectedJobId && !newVoucherLines.some((l) => l.jobId)) {
+      setVoucherError('Please select a Job Order for this Jobwise Journal Entry (or assign a Job per line).');
+      return;
+    }
 
     try {
       const res = await fetch('/api/accounting/post-journal', {
@@ -994,7 +1005,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               </h2>
               <p className="text-xs text-slate-400">Payment Vouchers (PV), Receipt Vouchers (RV), Journal Vouchers (JV), Expense Vouchers (EV), and Advance Vouchers (AV).</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-lg text-xs">
                 {['ALL', 'PV', 'RV', 'JV', 'EV', 'AV'].map((t) => (
                   <button
@@ -1008,6 +1019,20 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                   </button>
                 ))}
               </div>
+              <select
+                value={selectedJobFilter}
+                onChange={(e) => setSelectedJobFilter(e.target.value)}
+                className="bg-slate-900 border border-slate-800 text-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:ring-1 focus:ring-indigo-500"
+              >
+                <option value="ALL">All Entries (Jobwise & General)</option>
+                <option value="JOBWISE_ONLY">Jobwise Entries Only</option>
+                <option value="GENERAL_ONLY">General / Non-Job Entries</option>
+                {jobsList.map((job) => (
+                  <option key={job.job_id} value={job.job_id}>
+                    Job #{job.job_number} — {job.title}
+                  </option>
+                ))}
+              </select>
               <button
                 onClick={() => openNewJournalEntryModal()}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm transition"
@@ -1017,6 +1042,9 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               <button
                 onClick={() => {
                   setNewVoucherType('PV');
+                  setVoucherError(null);
+                  setIsJobwiseEntry(false);
+                  setSelectedJobId('');
                   setIsVoucherModalOpen(true);
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition"
@@ -1032,6 +1060,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                 <tr>
                   <th className="py-2.5 px-4 font-semibold">Voucher #</th>
                   <th className="py-2.5 px-4 font-semibold">Type</th>
+                  <th className="py-2.5 px-4 font-semibold">Job Order</th>
                   <th className="py-2.5 px-4 font-semibold">Date</th>
                   <th className="py-2.5 px-4 font-semibold">Narration / Memo</th>
                   <th className="py-2.5 px-4 font-semibold text-right">Debit (AED)</th>
@@ -1043,6 +1072,12 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               <tbody className="divide-y divide-slate-800/80">
                 {journals
                   .filter((j) => selectedVoucherType === 'ALL' || (j.voucher_type || 'JV') === selectedVoucherType || j.entry_number.startsWith(selectedVoucherType))
+                  .filter((j) => {
+                    if (selectedJobFilter === 'ALL') return true;
+                    if (selectedJobFilter === 'JOBWISE_ONLY') return Boolean(j.job_id || j.job_number);
+                    if (selectedJobFilter === 'GENERAL_ONLY') return !j.job_id && !j.job_number;
+                    return j.job_id === selectedJobFilter;
+                  })
                   .map((j) => {
                     const vType = j.voucher_type || (j.entry_number.startsWith('PV') ? 'PV' : j.entry_number.startsWith('RV') ? 'RV' : j.entry_number.startsWith('EV') ? 'EV' : j.entry_number.startsWith('AV') ? 'AV' : 'JV');
                     const badgeColor =
@@ -1050,6 +1085,8 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                       vType === 'RV' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
                       vType === 'EV' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
                       vType === 'AV' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+                    const matchedJob = j.job_id ? jobsList.find((jb) => jb.job_id === j.job_id) : null;
+                    const displayJobNo = j.job_number || matchedJob?.job_number;
 
                     return (
                       <tr key={j.journal_id} className="hover:bg-slate-800/40">
@@ -1058,6 +1095,16 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                           <span className={`text-[10px] px-2 py-0.5 rounded font-mono border ${badgeColor}`}>
                             {vType}
                           </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          {displayJobNo ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded font-mono bg-blue-500/10 text-blue-300 border border-blue-500/30" title={matchedJob?.title || ''}>
+                              <Briefcase className="h-2.5 w-2.5" />
+                              Job #{displayJobNo}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-slate-500">General</span>
+                          )}
                         </td>
                         <td className="py-3 px-4 text-slate-400 font-mono text-[11px]">{j.entry_date}</td>
                         <td className="py-3 px-4 text-white font-medium max-w-sm truncate">{j.memo}</td>
@@ -1556,7 +1603,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               </h2>
               <p className="text-xs text-slate-400">Auditable transaction history with running balances per account code.</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <select
                 value={selectedGlAccountId}
                 onChange={(e) => setSelectedGlAccountId(e.target.value)}
@@ -1566,6 +1613,19 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                 {accounts.map((a) => (
                   <option key={a.account_id} value={a.account_id}>
                     {a.account_code} - {a.account_name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={selectedJobFilter}
+                onChange={(e) => setSelectedJobFilter(e.target.value)}
+                className="bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-1.5 text-xs focus:ring-1 focus:ring-indigo-500"
+              >
+                <option value="ALL">All Jobs & General</option>
+                <option value="JOBWISE_ONLY">Jobwise Transactions Only</option>
+                {jobsList.map((job) => (
+                  <option key={job.job_id} value={job.job_id}>
+                    Job #{job.job_number} — {job.title}
                   </option>
                 ))}
               </select>
@@ -1581,7 +1641,15 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
           <div className="space-y-4">
             {generalLedger
               .filter((acc) => !selectedGlAccountId || acc.accountId === selectedGlAccountId)
-              .map((acc) => (
+              .map((acc) => {
+                const filteredTxs = (acc.transactions || []).filter((tx: any) => {
+                  if (selectedJobFilter === 'ALL') return true;
+                  if (selectedJobFilter === 'JOBWISE_ONLY') return Boolean(tx.jobId || tx.jobNumber);
+                  if (selectedJobFilter === 'GENERAL_ONLY') return !tx.jobId && !tx.jobNumber;
+                  return tx.jobId === selectedJobFilter;
+                });
+
+                return (
                 <div key={acc.accountId} className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-lg">
                   <div className="px-4 py-3 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
                     <div>
@@ -1600,6 +1668,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                         <th className="py-2 px-4 font-semibold">Date</th>
                         <th className="py-2 px-4 font-semibold">Voucher #</th>
                         <th className="py-2 px-4 font-semibold">Type</th>
+                        <th className="py-2 px-4 font-semibold">Job Order</th>
                         <th className="py-2 px-4 font-semibold">Line Narration / Memo</th>
                         <th className="py-2 px-4 font-semibold text-right">Debit (AED)</th>
                         <th className="py-2 px-4 font-semibold text-right">Credit (AED)</th>
@@ -1607,12 +1676,21 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/80">
-                      {acc.transactions && acc.transactions.length > 0 ? (
-                        acc.transactions.map((tx: any, idx: number) => (
+                      {filteredTxs.length > 0 ? (
+                        filteredTxs.map((tx: any, idx: number) => (
                           <tr key={idx} className="hover:bg-slate-800/40">
                             <td className="py-2.5 px-4 font-mono text-slate-400 text-[11px]">{tx.date}</td>
                             <td className="py-2.5 px-4 font-mono text-indigo-300 font-semibold">{tx.voucherNumber}</td>
                             <td className="py-2.5 px-4 font-mono text-[10px] text-slate-400">{tx.voucherType}</td>
+                            <td className="py-2.5 px-4">
+                              {tx.jobNumber ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-mono bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                                  Job #{tx.jobNumber}
+                                </span>
+                              ) : (
+                                <span className="text-slate-600 text-[11px]">-</span>
+                              )}
+                            </td>
                             <td className="py-2.5 px-4 text-white">{tx.memo}</td>
                             <td className="py-2.5 px-4 text-right font-mono text-slate-200">
                               {tx.debit > 0 ? Number(tx.debit).toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}
@@ -1627,15 +1705,16 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={7} className="py-3 px-4 text-center text-slate-500 italic">
-                            No posted transactions in this period. Opening balance: 0.00 AED.
+                          <td colSpan={8} className="py-3 px-4 text-center text-slate-500 italic">
+                            No posted transactions matching current filter. Opening balance: 0.00 AED.
                           </td>
                         </tr>
                       )}
                     </tbody>
                   </table>
                 </div>
-              ))}
+                );
+              })}
           </div>
         </div>
       )}
@@ -2610,6 +2689,91 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                 </div>
               </div>
 
+              {/* Entry Allocation Mode: General vs Jobwise Entry */}
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Briefcase className="h-3.5 w-3.5 text-blue-400" />
+                      Entry Scope / Job Cost Allocation
+                    </span>
+                    <p className="text-[11px] text-slate-400">
+                      Link this journal entry to a Job Order created in the Job Numbering Engine, or keep as a General entry.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-900 border border-slate-800 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsJobwiseEntry(false);
+                        setSelectedJobId('');
+                        setNewVoucherLines((prev) =>
+                          prev.map((l) => ({ ...l, jobId: '', jobNumber: '' }))
+                        );
+                      }}
+                      className={`px-2.5 py-1 rounded text-[11px] font-semibold transition ${
+                        !isJobwiseEntry
+                          ? 'bg-slate-700 text-white shadow'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      General Entry
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsJobwiseEntry(true)}
+                      className={`px-2.5 py-1 rounded text-[11px] font-semibold transition flex items-center gap-1 ${
+                        isJobwiseEntry
+                          ? 'bg-blue-600 text-white shadow'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Briefcase className="h-3 w-3" />
+                      Jobwise Entry
+                    </button>
+                  </div>
+                </div>
+
+                {isJobwiseEntry && (
+                  <div className="pt-2 border-t border-slate-800/80 space-y-2">
+                    <label className="block text-xs font-medium text-blue-300">
+                      Primary Job Order (from Job Orders)
+                    </label>
+                    {jobsList.length === 0 ? (
+                      <div className="p-2.5 rounded-lg bg-amber-950/30 border border-amber-500/30 text-[11px] text-amber-300">
+                        No Job Orders found yet. Create a Job Order in the <strong>Job Numbering Engine</strong> first to link entries here.
+                      </div>
+                    ) : (
+                      <select
+                        value={selectedJobId}
+                        onChange={(e) => {
+                          const newJId = e.target.value;
+                          setSelectedJobId(newJId);
+                          const jObj = jobsList.find((jb) => jb.job_id === newJId);
+                          const jNum = jObj?.job_number || '';
+                          setNewVoucherLines((prev) =>
+                            prev.map((l) => ({
+                              ...l,
+                              jobId: newJId,
+                              jobNumber: jNum,
+                            }))
+                          );
+                        }}
+                        className="w-full bg-slate-900 border border-blue-500/40 text-white rounded-lg px-3 py-2 text-xs focus:ring-1 focus:ring-blue-500 font-medium"
+                      >
+                        <option value="">Select Job Order (or assign individually per line below)...</option>
+                        {jobsList.map((job) => (
+                          <option key={job.job_id} value={job.job_id}>
+                            Job #{job.job_number} — {job.title}
+                            {job.client_name ? ` (${job.client_name})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1">
                   {newVoucherType === 'JV' ? 'Journal Narration / Description' : 'Narration / Memo'}
@@ -2620,7 +2784,9 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                   value={newVoucherMemo}
                   onChange={(e) => setNewVoucherMemo(e.target.value)}
                   placeholder={
-                    newVoucherType === 'JV'
+                    isJobwiseEntry
+                      ? 'e.g. Direct fabrication consumables & welder charges for Job Order'
+                      : newVoucherType === 'JV'
                       ? 'e.g. Monthly depreciation provision for fabrication machinery or audit accrual'
                       : 'e.g. Settlement of supplier invoice for structural steel plates'
                   }
@@ -2634,9 +2800,20 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                   <span className="text-xs font-bold text-white">Double-Entry Lines (Min 2 Lines)</span>
                   <button
                     type="button"
-                    onClick={() =>
-                      setNewVoucherLines((prev) => [...prev, { accountId: '', debit: 0, credit: 0, lineMemo: '' }])
-                    }
+                    onClick={() => {
+                      const jObj = selectedJobId ? jobsList.find((jb) => jb.job_id === selectedJobId) : null;
+                      setNewVoucherLines((prev) => [
+                        ...prev,
+                        {
+                          accountId: '',
+                          debit: 0,
+                          credit: 0,
+                          lineMemo: '',
+                          jobId: isJobwiseEntry ? selectedJobId || '' : '',
+                          jobNumber: isJobwiseEntry ? jObj?.job_number || '' : '',
+                        },
+                      ]);
+                    }}
                     className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium"
                   >
                     <Plus className="h-3 w-3" /> Add Line Item
@@ -2645,67 +2822,108 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
 
                 <div className="space-y-2">
                   {newVoucherLines.map((line, idx) => (
-                    <div key={idx} className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 grid grid-cols-12 gap-2 items-center">
-                      <div className="col-span-5">
-                        <select
-                          value={line.accountId}
-                          onChange={(e) => {
-                            const updated = [...newVoucherLines];
-                            updated[idx].accountId = e.target.value;
-                            setNewVoucherLines(updated);
-                          }}
-                          required
-                          className="w-full bg-slate-900 border border-slate-700 text-white rounded px-2 py-1 text-xs"
-                        >
-                          <option value="">Select Account...</option>
-                          {accounts.map((a) => (
-                            <option key={a.account_id} value={a.account_id}>
-                              {a.account_code} - {a.account_name} ({a.account_type})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="col-span-3">
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="Debit (AED)"
-                          value={line.debit || ''}
-                          onChange={(e) => {
-                            const updated = [...newVoucherLines];
-                            updated[idx].debit = parseFloat(e.target.value) || 0;
-                            if (updated[idx].debit > 0) updated[idx].credit = 0;
-                            setNewVoucherLines(updated);
-                          }}
-                          className="w-full bg-slate-900 border border-slate-700 text-emerald-400 font-mono rounded px-2 py-1 text-xs font-semibold"
-                        />
-                      </div>
-                      <div className="col-span-3">
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="Credit (AED)"
-                          value={line.credit || ''}
-                          onChange={(e) => {
-                            const updated = [...newVoucherLines];
-                            updated[idx].credit = parseFloat(e.target.value) || 0;
-                            if (updated[idx].credit > 0) updated[idx].debit = 0;
-                            setNewVoucherLines(updated);
-                          }}
-                          className="w-full bg-slate-900 border border-slate-700 text-emerald-400 font-mono rounded px-2 py-1 text-xs font-semibold"
-                        />
-                      </div>
-                      <div className="col-span-1 text-center">
-                        {newVoucherLines.length > 2 && (
-                          <button
-                            type="button"
-                            onClick={() => setNewVoucherLines((prev) => prev.filter((_, i) => i !== idx))}
-                            className="text-slate-500 hover:text-rose-400"
+                    <div key={idx} className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+                      <div className="grid grid-cols-12 gap-2 items-center">
+                        <div className="col-span-5">
+                          <select
+                            value={line.accountId}
+                            onChange={(e) => {
+                              const updated = [...newVoucherLines];
+                              updated[idx].accountId = e.target.value;
+                              setNewVoucherLines(updated);
+                            }}
+                            required
+                            className="w-full bg-slate-900 border border-slate-700 text-white rounded px-2 py-1 text-xs"
                           >
-                            <X className="h-4 w-4" />
-                          </button>
-                        )}
+                            <option value="">Select Account...</option>
+                            {accounts.map((a) => (
+                              <option key={a.account_id} value={a.account_id}>
+                                {a.account_code} - {a.account_name} ({a.account_type})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="col-span-3">
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="Debit (AED)"
+                            value={line.debit || ''}
+                            onChange={(e) => {
+                              const updated = [...newVoucherLines];
+                              updated[idx].debit = parseFloat(e.target.value) || 0;
+                              if (updated[idx].debit > 0) updated[idx].credit = 0;
+                              setNewVoucherLines(updated);
+                            }}
+                            className="w-full bg-slate-900 border border-slate-700 text-emerald-400 font-mono rounded px-2 py-1 text-xs font-semibold"
+                          />
+                        </div>
+                        <div className="col-span-3">
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="Credit (AED)"
+                            value={line.credit || ''}
+                            onChange={(e) => {
+                              const updated = [...newVoucherLines];
+                              updated[idx].credit = parseFloat(e.target.value) || 0;
+                              if (updated[idx].credit > 0) updated[idx].debit = 0;
+                              setNewVoucherLines(updated);
+                            }}
+                            className="w-full bg-slate-900 border border-slate-700 text-emerald-400 font-mono rounded px-2 py-1 text-xs font-semibold"
+                          />
+                        </div>
+                        <div className="col-span-1 text-center">
+                          {newVoucherLines.length > 2 && (
+                            <button
+                              type="button"
+                              onClick={() => setNewVoucherLines((prev) => prev.filter((_, i) => i !== idx))}
+                              className="text-slate-500 hover:text-rose-400"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
                       </div>
+
+                      {isJobwiseEntry && (
+                        <div className="grid grid-cols-12 gap-2 items-center pt-1.5 border-t border-slate-900">
+                          <div className="col-span-6">
+                            <select
+                              value={line.jobId || ''}
+                              onChange={(e) => {
+                                const jId = e.target.value;
+                                const jObj = jobsList.find((jb) => jb.job_id === jId);
+                                const updated = [...newVoucherLines];
+                                updated[idx].jobId = jId;
+                                updated[idx].jobNumber = jObj?.job_number || '';
+                                setNewVoucherLines(updated);
+                              }}
+                              className="w-full bg-slate-900 border border-blue-500/30 text-blue-200 rounded px-2 py-1 text-[11px]"
+                            >
+                              <option value="">No Job on this line (General)</option>
+                              {jobsList.map((job) => (
+                                <option key={job.job_id} value={job.job_id}>
+                                  Job #{job.job_number} — {job.title}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="col-span-6">
+                            <input
+                              type="text"
+                              placeholder="Line narration / cost detail (optional)"
+                              value={line.lineMemo || ''}
+                              onChange={(e) => {
+                                const updated = [...newVoucherLines];
+                                updated[idx].lineMemo = e.target.value;
+                                setNewVoucherLines(updated);
+                              }}
+                              className="w-full bg-slate-900 border border-slate-800 text-slate-300 rounded px-2 py-1 text-[11px]"
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -2885,6 +3103,11 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               <div>
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
                   <Receipt className="h-4 w-4 text-indigo-400" /> Voucher #{viewingVoucher.entry_number}
+                  {viewingVoucher.job_number && (
+                    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded font-mono bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                      <Briefcase className="h-2.5 w-2.5" /> Job #{viewingVoucher.job_number}
+                    </span>
+                  )}
                 </h3>
                 <p className="text-xs text-slate-400">{viewingVoucher.memo} · Date: {viewingVoucher.entry_date}</p>
               </div>
@@ -2898,6 +3121,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                 <thead className="bg-slate-950 text-slate-400 border-b border-slate-800">
                   <tr>
                     <th className="py-2 px-3">Account</th>
+                    <th className="py-2 px-3">Job Order</th>
                     <th className="py-2 px-3">Line Memo</th>
                     <th className="py-2 px-3 text-right">Debit (AED)</th>
                     <th className="py-2 px-3 text-right">Credit (AED)</th>
@@ -2906,10 +3130,21 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                 <tbody className="divide-y divide-slate-800">
                   {viewingVoucher.lines?.map((line: any, idx: number) => {
                     const acc = accounts.find((a) => a.account_id === line.account_id);
+                    const lineJob = line.job_id ? jobsList.find((jb) => jb.job_id === line.job_id) : null;
+                    const lineJobNo = line.job_number || lineJob?.job_number;
                     return (
                       <tr key={idx} className="hover:bg-slate-800/40">
                         <td className="py-2.5 px-3 font-medium text-white">
                           <span className="font-mono text-indigo-400 font-bold">{acc?.account_code || line.account_id}</span> - {acc?.account_name || 'General Account'}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          {lineJobNo ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                              Job #{lineJobNo}
+                            </span>
+                          ) : (
+                            <span className="text-slate-500 text-[11px]">General</span>
+                          )}
                         </td>
                         <td className="py-2.5 px-3 text-slate-300">{line.line_memo}</td>
                         <td className="py-2.5 px-3 text-right font-mono text-slate-200">

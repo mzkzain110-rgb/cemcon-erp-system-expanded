@@ -2160,6 +2160,7 @@ export default function App() {
               }
               tenantName={session?.tenant?.tenant_name || 'CEMCON Group Holding'}
               userRole={session?.session?.roleCode}
+              jobs={jobs}
             />
           )}
 

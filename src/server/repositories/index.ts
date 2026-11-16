@@ -1063,6 +1063,8 @@ export class AccountingRepository extends BaseRepository {
             voucherType: j.voucher_type || 'JV',
             date: j.entry_date,
             memo: l.line_memo || j.memo,
+            jobId: l.job_id || j.job_id || null,
+            jobNumber: l.job_number || j.job_number || null,
             debit: parseFloat(String(l.debit || 0)),
             credit: parseFloat(String(l.credit || 0)),
           };
