@@ -188,26 +188,92 @@ export class GoogleSheetsServiceAccountClient {
   }
 
   /**
-   * Append a row to a tab in Google Sheets
+   * Ensure a specific tab exists remotely with its header row (used if a new tab was added to schema)
    */
-  public async appendRow(tabName: string, rowValues: any[]): Promise<boolean> {
+  public async ensureTabExists(tabName: string, headers: string[]): Promise<boolean> {
     if (!this.isLiveReady()) return false;
     const sheetId = (process.env.GOOGLE_SHEET_ID || '').trim().replace(/^["']|["']$/g, '');
+    try {
+      const meta = await this.sheetsApi!.spreadsheets.get({ spreadsheetId: sheetId });
+      const exists = (meta.data.sheets || []).some((s) => s.properties?.title === tabName);
+      if (!exists) {
+        await this.sheetsApi!.spreadsheets.batchUpdate({
+          spreadsheetId: sheetId,
+          requestBody: {
+            requests: [
+              {
+                addSheet: {
+                  properties: {
+                    title: tabName,
+                    gridProperties: { frozenRowCount: 1 },
+                  },
+                },
+              },
+            ],
+          },
+        });
+        await this.sheetsApi!.spreadsheets.values.update({
+          spreadsheetId: sheetId,
+          range: this.safeTabRange(tabName, 'A1'),
+          valueInputOption: 'USER_ENTERED',
+          requestBody: { values: [headers] },
+        });
+      }
+      return true;
+    } catch (err: any) {
+      console.warn(`[GoogleSheetsClient] Failed to ensure tab ${tabName}:`, err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Append a single row to a tab in Google Sheets with INSERT_ROWS and auth retry
+   */
+  public async appendRow(tabName: string, rowValues: any[], headersForFallback?: string[]): Promise<boolean> {
+    return this.appendRowsBatch(tabName, [rowValues], headersForFallback);
+  }
+
+  /**
+   * Append one or more rows in a single Google Sheets API call
+   */
+  public async appendRowsBatch(tabName: string, rowsValues: any[][], headersForFallback?: string[]): Promise<boolean> {
+    if (rowsValues.length === 0) return true;
+    if (!this.isLiveReady() && !this.refreshAuth()) return false;
+    const sheetId = (process.env.GOOGLE_SHEET_ID || '').trim().replace(/^["']|["']$/g, '');
+    const formattedRows = rowsValues.map((row) => row.map((v) => this.formatCellValue(v)));
 
     try {
-      const formatted = rowValues.map((v) => this.formatCellValue(v));
       await this.sheetsApi!.spreadsheets.values.append({
         spreadsheetId: sheetId,
         range: this.safeTabRange(tabName, 'A1'),
         valueInputOption: 'USER_ENTERED',
+        insertDataOption: 'INSERT_ROWS',
         requestBody: {
-          values: [formatted],
+          values: formattedRows,
         },
       });
       return true;
     } catch (err: any) {
-      console.warn(`[GoogleSheetsClient] Failed to append row to ${tabName}:`, err.message);
-      return false;
+      console.warn(`[GoogleSheetsClient] Initial append to ${tabName} failed (${err.message}), retrying...`);
+      try {
+        this.refreshAuth();
+        if (headersForFallback && err.message?.includes('Unable to parse range')) {
+          await this.ensureTabExists(tabName, headersForFallback);
+        }
+        await this.sheetsApi!.spreadsheets.values.append({
+          spreadsheetId: sheetId,
+          range: this.safeTabRange(tabName, 'A1'),
+          valueInputOption: 'USER_ENTERED',
+          insertDataOption: 'INSERT_ROWS',
+          requestBody: {
+            values: formattedRows,
+          },
+        });
+        return true;
+      } catch (retryErr: any) {
+        console.error(`[GoogleSheetsClient] Retry append to ${tabName} failed:`, retryErr.message);
+        return false;
+      }
     }
   }
 

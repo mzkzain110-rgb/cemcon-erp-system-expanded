@@ -5,6 +5,8 @@
  */
 
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { ERP_TAB_SCHEMAS, TabSchema } from '../schema/definitions.js';
 import { googleSheetsClient } from './googleSheetsClient.js';
 
@@ -102,6 +104,10 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
   private sheets = new Map<string, { headers: string[]; rows: Record<string, any>[] }>();
   private mutex = new InMemoryMutex();
   private initialized = false;
+  private initPromise: Promise<void> | null = null;
+  private tabLastSyncedAt = new Map<string, number>();
+  private pendingTabSyncs = new Map<string, Promise<void>>();
+  private snapshotPath = path.join(process.env.VERCEL ? '/tmp' : process.cwd(), '.compenia-erp-snapshot.json');
 
   constructor() {
     this.initSchemas();
@@ -116,25 +122,149 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
     }
   }
 
-  async init(): Promise<void> {
-    if (this.initialized) return;
-    this.seedInitialData();
-    this.initialized = true;
-
-    // Automatically verify and ensure remote Google Sheet tabs exist when service account credentials are present
-    if (googleSheetsClient.isLiveReady()) {
-      try {
-        console.log('[StorageAdapter] Initializing live Google Sheets database...');
-        const testRes = await googleSheetsClient.testLiveConnection();
-        if (testRes.liveStatus === 'CONNECTED') {
-          console.log('[StorageAdapter] Remote connection established. Synchronizing production tabs...');
-          await googleSheetsClient.initializeRemoteSpreadsheet(this.sheets);
-          await this.ensureMasterSeedsForAllCompanies(true);
-        }
-      } catch (err: any) {
-        console.warn('[StorageAdapter] Google Sheets synchronization check:', err.message);
+  private coerceRowBySchema(tabName: string, rec: Record<string, any>): Record<string, any> {
+    const schema = ERP_TAB_SCHEMAS[tabName];
+    if (!schema) return rec;
+    const coerced: Record<string, any> = { ...rec };
+    for (const col of schema.columns) {
+      const val = coerced[col.name];
+      if (val === undefined || val === null || val === '') continue;
+      if (col.type === 'boolean' && typeof val !== 'boolean') {
+        const s = String(val).trim().toLowerCase();
+        coerced[col.name] = s === 'true' || s === '1' || s === 'yes';
+      } else if ((col.type === 'number' || col.type === 'decimal') && typeof val !== 'number') {
+        const parsed = Number(val);
+        if (!Number.isNaN(parsed)) coerced[col.name] = parsed;
       }
     }
+    return coerced;
+  }
+
+  private coerceAllLoadedSheets() {
+    for (const [tabName, sheet] of this.sheets.entries()) {
+      sheet.rows = sheet.rows.map((r) => this.coerceRowBySchema(tabName, r));
+      this.tabLastSyncedAt.set(tabName, Date.now());
+    }
+  }
+
+  private saveLocalSnapshot() {
+    try {
+      const dump: Record<string, Record<string, any>[]> = {};
+      for (const [tabName, sheet] of this.sheets.entries()) {
+        dump[tabName] = sheet.rows;
+      }
+      fs.writeFileSync(this.snapshotPath, JSON.stringify(dump), 'utf8');
+    } catch (err: any) {
+      console.warn('[StorageAdapter] Failed to write local snapshot:', err.message);
+    }
+  }
+
+  private loadLocalSnapshot(): boolean {
+    try {
+      if (!fs.existsSync(this.snapshotPath)) return false;
+      const raw = fs.readFileSync(this.snapshotPath, 'utf8');
+      if (!raw) return false;
+      const dump = JSON.parse(raw) as Record<string, Record<string, any>[]>;
+      for (const [tabName, rows] of Object.entries(dump)) {
+        const sheet = this.sheets.get(tabName);
+        if (sheet && Array.isArray(rows)) {
+          sheet.rows = rows.map((r) => this.coerceRowBySchema(tabName, r));
+        }
+      }
+      return true;
+    } catch (err: any) {
+      console.warn('[StorageAdapter] Failed to load local snapshot:', err.message);
+      return false;
+    }
+  }
+
+  private async syncTabFromRemote(tabName: string, force = false): Promise<void> {
+    if (!googleSheetsClient.isLiveReady()) return;
+    const lastSync = this.tabLastSyncedAt.get(tabName) || 0;
+    if (!force && Date.now() - lastSync < 2500) return;
+
+    const existingPromise = this.pendingTabSyncs.get(tabName);
+    if (existingPromise) {
+      await existingPromise;
+      return;
+    }
+
+    const promise = (async () => {
+      try {
+        const remoteValues = await googleSheetsClient.readTabValues(tabName);
+        if (!remoteValues) return;
+        const schema = this.getSchema(tabName);
+        const headers = schema.columns.map((c) => c.name);
+        if (remoteValues.length >= 1) {
+          const remoteHeaders = (remoteValues[0] || []).map((h: any) => String(h || '').trim());
+          const records: Record<string, any>[] = [];
+          for (let r = 1; r < remoteValues.length; r++) {
+            const rowVals = remoteValues[r];
+            if (!rowVals || rowVals.length === 0 || rowVals.every((v: any) => v === '' || v === undefined)) continue;
+            const rec: Record<string, any> = {};
+            for (let c = 0; c < remoteHeaders.length; c++) {
+              const colName = remoteHeaders[c];
+              if (colName) {
+                let cellVal = rowVals[c] !== undefined ? rowVals[c] : '';
+                if (typeof cellVal === 'string' && cellVal.startsWith("'")) {
+                  cellVal = cellVal.slice(1);
+                }
+                rec[colName] = cellVal;
+              }
+            }
+            records.push(this.coerceRowBySchema(tabName, rec));
+          }
+          this.sheets.set(tabName, { headers, rows: records });
+          this.tabLastSyncedAt.set(tabName, Date.now());
+        }
+      } catch (err: any) {
+        console.warn(`[StorageAdapter] Live tab refresh failed for ${tabName}:`, err.message);
+      } finally {
+        this.pendingTabSyncs.delete(tabName);
+      }
+    })();
+
+    this.pendingTabSyncs.set(tabName, promise);
+    await promise;
+  }
+
+  async init(): Promise<void> {
+    if (this.initialized) return;
+    if (this.initPromise) {
+      await this.initPromise;
+      return;
+    }
+
+    this.initPromise = (async () => {
+      this.seedInitialData();
+
+      if (googleSheetsClient.isLiveReady()) {
+        try {
+          console.log('[StorageAdapter] Initializing live Google Sheets database...');
+          const testRes = await googleSheetsClient.testLiveConnection();
+          if (testRes.liveStatus === 'CONNECTED') {
+            console.log('[StorageAdapter] Remote connection established. Synchronizing production tabs...');
+            await googleSheetsClient.initializeRemoteSpreadsheet(this.sheets);
+            this.coerceAllLoadedSheets();
+            await this.ensureMasterSeedsForAllCompanies(true);
+            this.saveLocalSnapshot();
+          }
+        } catch (err: any) {
+          console.warn('[StorageAdapter] Google Sheets synchronization check:', err.message);
+        }
+      } else {
+        const loaded = this.loadLocalSnapshot();
+        if (loaded) {
+          console.log('[StorageAdapter] Restored persisted state from local snapshot.');
+        }
+        await this.ensureMasterSeedsForAllCompanies(false);
+        this.saveLocalSnapshot();
+      }
+
+      this.initialized = true;
+    })();
+
+    await this.initPromise;
   }
 
   getSchema(tabName: string): TabSchema {
@@ -190,6 +320,7 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
   }
 
   async readTab<T = any>(tabName: string, query?: StorageQuery): Promise<StorageResult<T>> {
+    await this.syncTabFromRemote(tabName, false);
     const sheet = this.sheets.get(tabName);
     if (!sheet) {
       throw new Error(`Tab "${tabName}" does not exist in spreadsheet database.`);
@@ -254,10 +385,15 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
   async getRowById<T = any>(tabName: string, id: string, context?: SecurityContext): Promise<T | null> {
     const schema = this.getSchema(tabName);
     const pkCol = schema.columns.find((c) => c.primaryKey)?.name || 'id';
-    const sheet = this.sheets.get(tabName);
+    let sheet = this.sheets.get(tabName);
     if (!sheet) return null;
 
-    const row = sheet.rows.find((r) => r[pkCol] === id);
+    let row = sheet.rows.find((r) => r[pkCol] === id);
+    if (!row && googleSheetsClient.isLiveReady()) {
+      await this.syncTabFromRemote(tabName, true);
+      sheet = this.sheets.get(tabName);
+      row = sheet?.rows.find((r) => r[pkCol] === id);
+    }
     if (!row) return null;
 
     // Security check
@@ -331,22 +467,29 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
     }
 
     sheet.rows.push(rowToSave);
+    this.tabLastSyncedAt.set(tabName, Date.now());
 
     // Synchronously replicate write to live Google Sheets API if service account is active
     if (googleSheetsClient.isLiveReady()) {
       const headers = sheet.headers;
       const rowArr = headers.map((h) => (rowToSave[h] !== undefined && rowToSave[h] !== null ? rowToSave[h] : ''));
-      try {
-        await googleSheetsClient.appendRow(tabName, rowArr);
-      } catch (err: any) {
-        console.warn(`[GoogleSheetsSync] Live append to ${tabName} failed:`, err.message);
+      const appended = await googleSheetsClient.appendRow(tabName, rowArr, headers);
+      if (!appended && tabName !== 'AuditLogs') {
+        // Rollback local row if live Google Sheets rejected the write
+        const idx = sheet.rows.lastIndexOf(rowToSave);
+        if (idx !== -1) sheet.rows.splice(idx, 1);
+        throw new Error(`Failed to save record permanently to Google Sheets tab [${tabName}]. Please verify service account Editor permissions.`);
       }
     }
 
+    this.saveLocalSnapshot();
     return rowToSave as T;
   }
 
   async updateRow<T = any>(tabName: string, id: string, updates: Record<string, any>, context?: SecurityContext): Promise<T> {
+    if (googleSheetsClient.isLiveReady()) {
+      await this.syncTabFromRemote(tabName, true);
+    }
     const schema = this.getSchema(tabName);
     const pkCol = schema.columns.find((c) => c.primaryKey)?.name || 'id';
     const sheet = this.sheets.get(tabName)!;
@@ -373,22 +516,27 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
     this.validateRow(tabName, merged, true);
 
     sheet.rows[index] = merged;
+    this.tabLastSyncedAt.set(tabName, Date.now());
 
     // Synchronously replicate update to live Google Sheets API (row index is index + 2 due to 1-indexed header)
     if (googleSheetsClient.isLiveReady()) {
       const headers = sheet.headers;
       const rowArr = headers.map((h) => (merged[h] !== undefined && merged[h] !== null ? merged[h] : ''));
-      try {
-        await googleSheetsClient.updateRow(tabName, index + 2, rowArr);
-      } catch (err: any) {
-        console.warn(`[GoogleSheetsSync] Live update in ${tabName} at row ${index + 2} failed:`, err.message);
+      const ok = await googleSheetsClient.updateRow(tabName, index + 2, rowArr);
+      if (!ok) {
+        sheet.rows[index] = existing;
+        throw new Error(`Failed to update record permanently in Google Sheets tab [${tabName}].`);
       }
     }
 
+    this.saveLocalSnapshot();
     return merged as T;
   }
 
   async deleteRow(tabName: string, id: string, context?: SecurityContext): Promise<boolean> {
+    if (googleSheetsClient.isLiveReady()) {
+      await this.syncTabFromRemote(tabName, true);
+    }
     const schema = this.getSchema(tabName);
     const pkCol = schema.columns.find((c) => c.primaryKey)?.name || 'id';
     const sheet = this.sheets.get(tabName)!;
@@ -402,28 +550,88 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
     }
 
     sheet.rows.splice(index, 1);
+    this.tabLastSyncedAt.set(tabName, Date.now());
 
     // Synchronously delete from Google Sheets if live ready
     if (googleSheetsClient.isLiveReady()) {
-      try {
-        await googleSheetsClient.deleteRow(tabName, index + 2);
-      } catch (err: any) {
-        console.warn(`[GoogleSheetsSync] Live delete in ${tabName} at row ${index + 2} failed:`, err.message);
+      const ok = await googleSheetsClient.deleteRow(tabName, index + 2);
+      if (!ok) {
+        sheet.rows.splice(index, 0, existing);
+        throw new Error(`Failed to delete record from Google Sheets tab [${tabName}].`);
       }
     }
 
+    this.saveLocalSnapshot();
     return true;
   }
 
   async batchWrite<T = any>(tabName: string, rows: Record<string, any>[], context?: SecurityContext): Promise<T[]> {
+    if (rows.length === 0) return [];
     const release = await this.acquireLock(`batch_${tabName}`);
     try {
-      const results: T[] = [];
+      const schema = this.getSchema(tabName);
+      const pkCol = schema.columns.find((c) => c.primaryKey)?.name || 'id';
+      const sheet = this.sheets.get(tabName)!;
+      const hasCompanyIdCol = schema.columns.some((c) => c.name === 'company_id');
+      const nowIso = new Date().toISOString();
+
+      const preparedRows: Record<string, any>[] = [];
       for (const row of rows) {
-        const saved = await this.writeRow<T>(tabName, row, context);
-        results.push(saved);
+        const rowToSave: Record<string, any> = { ...row };
+        if (!rowToSave[pkCol]) rowToSave[pkCol] = crypto.randomUUID();
+        if (context) {
+          if (schema.columns.some((c) => c.name === 'tenant_id') && !rowToSave.tenant_id) {
+            rowToSave.tenant_id = context.tenantId;
+          }
+          if (hasCompanyIdCol && !rowToSave.company_id && context.companyId) {
+            rowToSave.company_id = context.companyId;
+          }
+        }
+        if (context && rowToSave.tenant_id && rowToSave.tenant_id !== context.tenantId) {
+          throw new Error(`Security breach: Tenant ID mismatch. Cannot write record for another tenant.`);
+        }
+        if (schema.columns.some((c) => c.name === 'created_at') && !rowToSave.created_at) {
+          rowToSave.created_at = nowIso;
+        }
+        if (schema.columns.some((c) => c.name === 'updated_at') && !rowToSave.updated_at) {
+          rowToSave.updated_at = nowIso;
+        }
+        this.validateRow(tabName, rowToSave, false);
+
+        for (const col of schema.columns) {
+          if (col.unique && rowToSave[col.name] !== undefined && rowToSave[col.name] !== null && rowToSave[col.name] !== '') {
+            const duplicate = [...sheet.rows, ...preparedRows].find((r) => {
+              if (r[col.name] !== rowToSave[col.name]) return false;
+              if (!col.primaryKey && hasCompanyIdCol && rowToSave.company_id && r.company_id) {
+                return r.company_id === rowToSave.company_id;
+              }
+              return true;
+            });
+            if (duplicate) {
+              throw new Error(
+                `Unique constraint violated on tab [${tabName}]: Column "${col.name}" value "${rowToSave[col.name]}" already exists.`
+              );
+            }
+          }
+        }
+        preparedRows.push(rowToSave);
       }
-      return results;
+
+      sheet.rows.push(...preparedRows);
+      this.tabLastSyncedAt.set(tabName, Date.now());
+
+      if (googleSheetsClient.isLiveReady()) {
+        const headers = sheet.headers;
+        const rowsArr = preparedRows.map((r) => headers.map((h) => (r[h] !== undefined && r[h] !== null ? r[h] : '')));
+        const ok = await googleSheetsClient.appendRowsBatch(tabName, rowsArr, headers);
+        if (!ok) {
+          sheet.rows.splice(sheet.rows.length - preparedRows.length, preparedRows.length);
+          throw new Error(`Failed to batch save records permanently to Google Sheets tab [${tabName}].`);
+        }
+      }
+
+      this.saveLocalSnapshot();
+      return preparedRows as T[];
     } finally {
       release();
     }

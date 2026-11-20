@@ -71,6 +71,9 @@ export const JobEstimationModule: React.FC<JobEstimationModuleProps> = ({
   useEffect(() => {
     let isMounted = true;
     setLoading(true);
+    setEstimations([]);
+    setStats(null);
+    setExistingJobs([]);
 
     Promise.all([
       fetch('/api/estimations').then((r) => r.json()),
@@ -82,7 +85,7 @@ export const JobEstimationModule: React.FC<JobEstimationModuleProps> = ({
         const estList = Array.isArray(estData) ? estData : estData?.data || [];
         setEstimations(estList);
         setStats(statsData);
-        setExistingJobs(Array.isArray(jobsData) ? jobsData : []);
+        setExistingJobs(jobsData?.data || (Array.isArray(jobsData) ? jobsData : []));
         setLoading(false);
       })
       .catch((err) => {
@@ -94,7 +97,7 @@ export const JobEstimationModule: React.FC<JobEstimationModuleProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [refreshTrigger]);
+  }, [refreshTrigger, activeCompany?.code, activeCompany?.name]);
 
   // Safe parse helper
   const parseJsonArray = (val: any) => {

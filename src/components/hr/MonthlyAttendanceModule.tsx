@@ -28,9 +28,11 @@ interface AttendanceRecord {
   attendance_id?: string;
   employee_id: string;
   date: string;
-  status: string; // 'P' | 'A' | 'V' | 'PRESENT' | 'ABSENT' | 'VACATION'
+  status: string;
   code?: string;
   trade?: string;
+  job_id?: string;
+  job_number?: string;
   shift_hours?: number;
   ot_hours?: number;
   notes?: string;
@@ -40,6 +42,7 @@ interface MonthlyAttendanceModuleProps {
   session: any;
   departments: any[];
   employees: any[];
+  jobs?: any[];
   onRefreshEmployees?: () => void;
   triggerGoogleSheetsSync?: () => void;
   onOpenSalary?: () => void;
@@ -49,47 +52,73 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
   session,
   departments,
   employees,
+  jobs: jobsProp = [],
   triggerGoogleSheetsSync,
   onOpenSalary,
 }) => {
-  // Date State: Year & Month
   const today = new Date();
   const [selectedYear, setSelectedYear] = useState<number>(today.getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState<number>(today.getMonth() + 1); // 1-12
-  const [totalDaysInMonth, setTotalDaysInMonth] = useState<number>(30); // 30 days as requested
+  const [selectedMonth, setSelectedMonth] = useState<number>(today.getMonth() + 1);
+  const [totalDaysInMonth, setTotalDaysInMonth] = useState<number>(30);
 
-  // Filter State
   const [selectedDeptFilter, setSelectedDeptFilter] = useState<string>('ALL');
+  const [selectedJobFilter, setSelectedJobFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Attendance Records: Map of key `${employee_id}_${date}` -> AttendanceRecord
+  const [fetchedJobs, setFetchedJobs] = useState<any[]>([]);
+  const availableJobs = useMemo(() => {
+    const map = new Map<string, any>();
+    [...fetchedJobs, ...jobsProp].forEach((j) => {
+      if (j && j.job_id) map.set(j.job_id, j);
+    });
+    return Array.from(map.values());
+  }, [fetchedJobs, jobsProp]);
+  const [rowJobs, setRowJobs] = useState<Record<string, { job_id: string; job_number: string }>>({});
+
   const [attendanceMap, setAttendanceMap] = useState<Record<string, AttendanceRecord>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
 
-  // Quick Daily Mark Modal
   const [isDailyModalOpen, setIsDailyModalOpen] = useState(false);
   const [dailyModalDate, setDailyModalDate] = useState<string>(
     new Date().toISOString().split('T')[0]
   );
+  const [dailyModalBulkJobId, setDailyModalBulkJobId] = useState<string>('');
   const [dailyMarks, setDailyMarks] = useState<
-    Record<string, { status: 'P' | 'A' | 'V'; ot: number; trade: string }>
+    Record<string, { status: 'P' | 'A' | 'V'; ot: number; trade: string; job_id?: string; job_number?: string }>
   >({});
 
-  // Cell OT Edit Popover
   const [activeCellEdit, setActiveCellEdit] = useState<{
     empId: string;
     dayNum: number;
     currentStatus: 'P' | 'A' | 'V';
     currentOt: number;
+    currentJobId: string;
+    currentJobNumber: string;
   } | null>(null);
 
-  // Local Trade custom overrides (if user wants to customize trade beyond designation)
   const [customTrades, setCustomTrades] = useState<Record<string, string>>({});
 
-  // 1. Fetch Attendance from Backend on load or month change
+  useEffect(() => {
+    setAttendanceMap({});
+    setRowJobs({});
+    setCustomTrades({});
+    setSelectedDeptFilter('ALL');
+    setSelectedJobFilter('ALL');
+    setSearchQuery('');
+    setHasUnsavedChanges(false);
+
+    fetch('/api/jobs')
+      .then((r) => (r.ok ? r.json() : { data: [] }))
+      .then((json) => {
+        const list = Array.isArray(json) ? json : json?.data || [];
+        setFetchedJobs(list);
+      })
+      .catch((err) => console.error('Error loading jobs for attendance:', err));
+  }, [session?.company?.company_id]);
+
   useEffect(() => {
     fetchAttendance();
   }, [selectedYear, selectedMonth, session?.company?.company_id]);
@@ -103,12 +132,21 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
         const json = await res.json();
         const records: AttendanceRecord[] = json.data || [];
         const newMap: Record<string, AttendanceRecord> = {};
+        const inferredRowJobs: Record<string, { job_id: string; job_number: string }> = {};
+        const monthPrefix = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
         for (const r of records) {
           if (r.employee_id && r.date) {
             newMap[`${r.employee_id}_${r.date}`] = r;
+            if (r.date.startsWith(monthPrefix) && (r.job_id || r.job_number)) {
+              inferredRowJobs[r.employee_id] = {
+                job_id: r.job_id || '',
+                job_number: r.job_number || '',
+              };
+            }
           }
         }
         setAttendanceMap(newMap);
+        setRowJobs((prev) => ({ ...inferredRowJobs, ...prev }));
         setHasUnsavedChanges(false);
       }
     } catch (err) {
@@ -135,28 +173,46 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
     return 'Industrial Craftsman';
   };
 
+  const getEmployeeJob = (empId: string): { job_id: string; job_number: string } => {
+    return rowJobs[empId] || { job_id: '', job_number: '' };
+  };
+
   // Filtered employee list
   const filteredEmployees = useMemo(() => {
+    const monthPrefix = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
     return employees.filter((emp) => {
       const matchesDept =
         selectedDeptFilter === 'ALL' || emp.department_id === selectedDeptFilter;
       const q = searchQuery.toLowerCase().trim();
       const trade = getEmployeeTrade(emp).toLowerCase();
+      const empJob = getEmployeeJob(emp.employee_id);
+      const hasJobInMonth =
+        empJob.job_id === selectedJobFilter ||
+        Object.values(attendanceMap).some(
+          (r) =>
+            r.employee_id === emp.employee_id &&
+            r.date?.startsWith(monthPrefix) &&
+            r.job_id === selectedJobFilter
+        );
+      const matchesJob =
+        selectedJobFilter === 'ALL' ||
+        (selectedJobFilter === 'UNASSIGNED' ? !empJob.job_id : hasJobInMonth);
       const matchesQuery =
         !q ||
         (emp.full_name || '').toLowerCase().includes(q) ||
         (emp.employee_no || '').toLowerCase().includes(q) ||
+        (empJob.job_number || '').toLowerCase().includes(q) ||
         trade.includes(q);
-      return matchesDept && matchesQuery;
+      return matchesDept && matchesJob && matchesQuery;
     });
-  }, [employees, selectedDeptFilter, searchQuery, customTrades]);
+  }, [employees, selectedDeptFilter, selectedJobFilter, searchQuery, customTrades, rowJobs, attendanceMap, selectedYear, selectedMonth]);
 
   // Read cell state for employee & day
   const getCellAttendance = (empId: string, day: number) => {
     const dateStr = formatDateStr(day);
     const rec = attendanceMap[`${empId}_${dateStr}`];
     if (!rec) {
-      return { status: null, ot: 0, shift: 0 };
+      return { status: null, ot: 0, shift: 0, job_id: '', job_number: '' };
     }
     const rawStatus = (rec.status || rec.code || 'P').toUpperCase();
     const status: 'P' | 'A' | 'V' = rawStatus.startsWith('P')
@@ -166,7 +222,7 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
       : 'V';
     const ot = Number(rec.ot_hours || 0);
     const shift = status === 'P' ? 8 : status === 'V' ? 8 : 0;
-    return { status, ot, shift };
+    return { status, ot, shift, job_id: rec.job_id || '', job_number: rec.job_number || '' };
   };
 
   // Toggle cell status on click: null -> P -> A -> V -> P
@@ -180,6 +236,7 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
 
     const emp = employees.find((e) => e.employee_id === empId);
     const trade = emp ? getEmployeeTrade(emp) : '';
+    const empJob = getEmployeeJob(empId);
 
     setAttendanceMap((prev) => ({
       ...prev,
@@ -189,6 +246,8 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
         status: nextStatus,
         code: nextStatus,
         trade,
+        job_id: current.job_id || empJob.job_id || '',
+        job_number: current.job_number || empJob.job_number || '',
         shift_hours: nextStatus === 'P' ? 8 : nextStatus === 'V' ? 8 : 0,
         ot_hours: current.ot,
       },
@@ -201,6 +260,7 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
     const newMap = { ...attendanceMap };
     for (const emp of filteredEmployees) {
       const trade = getEmployeeTrade(emp);
+      const empJob = getEmployeeJob(emp.employee_id);
       for (let day = 1; day <= totalDaysInMonth; day++) {
         const dateStr = formatDateStr(day);
         const existing = newMap[`${emp.employee_id}_${dateStr}`];
@@ -210,6 +270,8 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
           status: 'P',
           code: 'P',
           trade,
+          job_id: existing?.job_id || empJob.job_id || '',
+          job_number: existing?.job_number || empJob.job_number || '',
           shift_hours: 8,
           ot_hours: existing ? existing.ot_hours || 0 : 0,
         };
@@ -226,6 +288,7 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
     const newMap = { ...attendanceMap };
     for (const emp of filteredEmployees) {
       const trade = getEmployeeTrade(emp);
+      const empJob = getEmployeeJob(emp.employee_id);
       const existing = newMap[`${emp.employee_id}_${dateStr}`];
       newMap[`${emp.employee_id}_${dateStr}`] = {
         employee_id: emp.employee_id,
@@ -233,6 +296,8 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
         status: 'P',
         code: 'P',
         trade,
+        job_id: existing?.job_id || empJob.job_id || '',
+        job_number: existing?.job_number || empJob.job_number || '',
         shift_hours: 8,
         ot_hours: existing ? existing.ot_hours || 0 : 0,
       };
@@ -247,13 +312,16 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
     setSaveSuccessMsg(null);
     try {
       const itemsToSave: any[] = [];
-      for (const [key, rec] of Object.entries(attendanceMap)) {
+      for (const [_key, rec] of Object.entries(attendanceMap)) {
         if (rec && rec.employee_id && rec.date) {
+          const fallbackJob = getEmployeeJob(rec.employee_id);
           itemsToSave.push({
             employee_id: rec.employee_id,
             date: rec.date,
             status: rec.status || rec.code || 'P',
             trade: rec.trade || '',
+            job_id: rec.job_id || fallbackJob.job_id || '',
+            job_number: rec.job_number || fallbackJob.job_number || '',
             shift_hours: rec.shift_hours !== undefined ? rec.shift_hours : rec.status === 'P' ? 8 : 0,
             ot_hours: rec.ot_hours || 0,
             notes: rec.notes || '',
@@ -354,6 +422,7 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
       'Employee Name',
       'Trade',
       'Department',
+      'Job Order',
       ...Array.from({ length: totalDaysInMonth }, (_, i) => `Day ${i + 1}`),
       'Total P (Days)',
       'Total A (Days)',
@@ -366,6 +435,7 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
     const rows = filteredEmployees.map((emp) => {
       const dept = departments.find((d) => d.department_id === emp.department_id);
       const trade = getEmployeeTrade(emp);
+      const empJob = getEmployeeJob(emp.employee_id);
       const stats = getEmployeeMonthStats(emp.employee_id);
 
       const daysCols = Array.from({ length: totalDaysInMonth }, (_, i) => {
@@ -380,6 +450,7 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
         `"${emp.full_name || ''}"`,
         `"${trade}"`,
         `"${dept?.name || ''}"`,
+        `"${empJob.job_number ? `Job #${empJob.job_number}` : 'General'}"`,
         ...daysCols,
         stats.presentDays,
         stats.absentDays,
@@ -462,13 +533,17 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
               const marks: any = {};
               for (const emp of employees) {
                 const rec = attendanceMap[`${emp.employee_id}_${dateStr}`];
+                const empJob = getEmployeeJob(emp.employee_id);
                 marks[emp.employee_id] = {
                   status: (rec?.status as any) || 'P',
                   ot: rec?.ot_hours || 0,
                   trade: getEmployeeTrade(emp),
+                  job_id: rec?.job_id || empJob.job_id || '',
+                  job_number: rec?.job_number || empJob.job_number || '',
                 };
               }
               setDailyMarks(marks);
+              setDailyModalBulkJobId('');
               setIsDailyModalOpen(true);
             }}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition"
@@ -663,6 +738,24 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
               ))}
             </select>
           </div>
+
+          {/* Job Order Filter */}
+          <div className="flex items-center gap-1.5 pl-2 border-l border-slate-800">
+            <span className="text-slate-400 font-medium">Job Order:</span>
+            <select
+              value={selectedJobFilter}
+              onChange={(e) => setSelectedJobFilter(e.target.value)}
+              className="bg-slate-800 border border-slate-700 text-amber-300 font-medium rounded-lg px-2.5 py-1.5 max-w-[200px]"
+            >
+              <option value="ALL">All Jobs ({availableJobs.length})</option>
+              <option value="UNASSIGNED">General / No Job</option>
+              {availableJobs.map((j: any) => (
+                <option key={j.job_id} value={j.job_id}>
+                  {j.job_number} — {j.title}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Search Input */}
@@ -763,6 +856,9 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
                 <th className="py-3 px-3 font-semibold text-blue-300 w-36 border-r border-slate-800 bg-blue-950/20">
                   Trade / Skill
                 </th>
+                <th className="py-3 px-3 font-semibold text-amber-300 w-44 border-r border-slate-800 bg-amber-950/15">
+                  Job Order
+                </th>
 
                 {/* 30 Calendar Days Columns */}
                 {Array.from({ length: totalDaysInMonth }, (_, i) => {
@@ -811,7 +907,7 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
               {filteredEmployees.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={totalDaysInMonth + 10}
+                    colSpan={totalDaysInMonth + 11}
                     className="py-12 text-center text-slate-500 font-medium"
                   >
                     No personnel found matching your filters. Register employees under "Departments & HR" first.
@@ -820,6 +916,7 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
               ) : (
                 filteredEmployees.map((emp, empIdx) => {
                   const trade = getEmployeeTrade(emp);
+                  const empJob = getEmployeeJob(emp.employee_id);
                   const stats = getEmployeeMonthStats(emp.employee_id);
 
                   return (
@@ -867,6 +964,46 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
                         </div>
                       </td>
 
+                      {/* Job Order Column */}
+                      <td className="py-2 px-2 border-r border-slate-800/80 bg-amber-950/5 whitespace-nowrap">
+                        <select
+                          value={empJob.job_id}
+                          onChange={(e) => {
+                            const nextJobId = e.target.value;
+                            const matched = availableJobs.find((j: any) => j.job_id === nextJobId);
+                            const nextJobNumber = matched?.job_number || '';
+                            setRowJobs((prev) => ({
+                              ...prev,
+                              [emp.employee_id]: { job_id: nextJobId, job_number: nextJobNumber },
+                            }));
+                            setAttendanceMap((prev) => {
+                              const updated = { ...prev };
+                              for (let d = 1; d <= totalDaysInMonth; d++) {
+                                const ds = formatDateStr(d);
+                                const k = `${emp.employee_id}_${ds}`;
+                                if (updated[k]) {
+                                  updated[k] = {
+                                    ...updated[k],
+                                    job_id: nextJobId,
+                                    job_number: nextJobNumber,
+                                  };
+                                }
+                              }
+                              return updated;
+                            });
+                            setHasUnsavedChanges(true);
+                          }}
+                          className="bg-slate-950/70 border border-slate-800 hover:border-amber-500/40 text-amber-300 font-medium text-[11px] rounded px-2 py-1 w-40 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                        >
+                          <option value="">General / Unassigned</option>
+                          {availableJobs.map((j: any) => (
+                            <option key={j.job_id} value={j.job_id}>
+                              {j.job_number} — {j.title}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+
                       {/* 30 Days Cells */}
                       {Array.from({ length: totalDaysInMonth }, (_, i) => {
                         const dayNum = i + 1;
@@ -892,6 +1029,8 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
                                 dayNum,
                                 currentStatus: cell.status || 'P',
                                 currentOt: cell.ot,
+                                currentJobId: cell.job_id || empJob.job_id || '',
+                                currentJobNumber: cell.job_number || empJob.job_number || '',
                               });
                             }}
                             className="p-1 text-center border-r border-slate-800/60 cursor-pointer select-none transition"
@@ -951,7 +1090,7 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
             {/* Table Footer: Column Summary */}
             <tfoot className="bg-slate-950 font-mono font-bold text-xs border-t-2 border-slate-800 text-slate-300">
               <tr>
-                <td colSpan={4} className="py-3 px-3 text-right text-slate-400 border-r border-slate-800 uppercase text-[10px]">
+                <td colSpan={5} className="py-3 px-3 text-right text-slate-400 border-r border-slate-800 uppercase text-[10px]">
                   Total Monthly Aggregates:
                 </td>
                 {/* 30 Day columns bottom totals */}
@@ -1059,10 +1198,13 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
                     const marks: any = {};
                     for (const emp of employees) {
                       const rec = attendanceMap[`${emp.employee_id}_${newDate}`];
+                      const empJob = getEmployeeJob(emp.employee_id);
                       marks[emp.employee_id] = {
                         status: (rec?.status as any) || 'P',
                         ot: rec?.ot_hours || 0,
                         trade: getEmployeeTrade(emp),
+                        job_id: rec?.job_id || empJob.job_id || '',
+                        job_number: rec?.job_number || empJob.job_number || '',
                       };
                     }
                     setDailyMarks(marks);
@@ -1071,17 +1213,51 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
                 />
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={dailyModalBulkJobId}
+                  onChange={(e) => {
+                    const nextJobId = e.target.value;
+                    setDailyModalBulkJobId(nextJobId);
+                    const matched = availableJobs.find((j: any) => j.job_id === nextJobId);
+                    const nextJobNumber = matched?.job_number || '';
+                    const updated = { ...dailyMarks };
+                    for (const emp of employees) {
+                      const prevMark = updated[emp.employee_id] || {
+                        status: 'P',
+                        ot: 0,
+                        trade: getEmployeeTrade(emp),
+                      };
+                      updated[emp.employee_id] = {
+                        ...prevMark,
+                        job_id: nextJobId,
+                        job_number: nextJobNumber,
+                      };
+                    }
+                    setDailyMarks(updated);
+                  }}
+                  className="bg-slate-800 border border-amber-500/30 text-amber-300 rounded-lg px-2.5 py-1 text-xs font-medium"
+                >
+                  <option value="">Apply Job to All...</option>
+                  {availableJobs.map((j: any) => (
+                    <option key={j.job_id} value={j.job_id}>
+                      {j.job_number} — {j.title}
+                    </option>
+                  ))}
+                </select>
                 <button
                   type="button"
                   onClick={() => {
                     const updated = { ...dailyMarks };
                     for (const emp of employees) {
+                      const empJob = getEmployeeJob(emp.employee_id);
                       updated[emp.employee_id] = {
                         ...(updated[emp.employee_id] || {}),
                         status: 'P',
                         ot: updated[emp.employee_id]?.ot || 0,
                         trade: getEmployeeTrade(emp),
+                        job_id: updated[emp.employee_id]?.job_id ?? empJob.job_id ?? '',
+                        job_number: updated[emp.employee_id]?.job_number ?? empJob.job_number ?? '',
                       };
                     }
                     setDailyMarks(updated);
@@ -1095,11 +1271,14 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
                   onClick={() => {
                     const updated = { ...dailyMarks };
                     for (const emp of employees) {
+                      const empJob = getEmployeeJob(emp.employee_id);
                       updated[emp.employee_id] = {
                         ...(updated[emp.employee_id] || {}),
                         status: 'A',
                         ot: 0,
                         trade: getEmployeeTrade(emp),
+                        job_id: updated[emp.employee_id]?.job_id ?? empJob.job_id ?? '',
+                        job_number: updated[emp.employee_id]?.job_number ?? empJob.job_number ?? '',
                       };
                     }
                     setDailyMarks(updated);
@@ -1119,6 +1298,7 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
                     <th className="py-2.5 px-3">Emp No</th>
                     <th className="py-2.5 px-3">Employee Name</th>
                     <th className="py-2.5 px-3 text-blue-300">Trade</th>
+                    <th className="py-2.5 px-3 text-amber-300">Job Order</th>
                     <th className="py-2.5 px-3 text-center">Status</th>
                     <th className="py-2.5 px-3 text-center">Shift Hours</th>
                     <th className="py-2.5 px-3 text-center text-amber-300">OT (Hours)</th>
@@ -1126,10 +1306,13 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 font-sans">
                   {employees.map((emp) => {
+                    const empJob = getEmployeeJob(emp.employee_id);
                     const mark = dailyMarks[emp.employee_id] || {
                       status: 'P',
                       ot: 0,
                       trade: getEmployeeTrade(emp),
+                      job_id: empJob.job_id || '',
+                      job_number: empJob.job_number || '',
                     };
 
                     return (
@@ -1155,6 +1338,31 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
                             }}
                             className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white w-36"
                           />
+                        </td>
+                        <td className="py-2.5 px-3 text-amber-300 font-medium">
+                          <select
+                            value={mark.job_id || ''}
+                            onChange={(e) => {
+                              const nextJobId = e.target.value;
+                              const matched = availableJobs.find((j: any) => j.job_id === nextJobId);
+                              setDailyMarks({
+                                ...dailyMarks,
+                                [emp.employee_id]: {
+                                  ...mark,
+                                  job_id: nextJobId,
+                                  job_number: matched?.job_number || '',
+                                },
+                              });
+                            }}
+                            className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-amber-300 w-40"
+                          >
+                            <option value="">General / Unassigned</option>
+                            {availableJobs.map((j: any) => (
+                              <option key={j.job_id} value={j.job_id}>
+                                {j.job_number} — {j.title}
+                              </option>
+                            ))}
+                          </select>
                         </td>
                         <td className="py-2.5 px-3 text-center">
                           <div className="inline-flex rounded-lg p-0.5 bg-slate-950 border border-slate-800">
@@ -1239,10 +1447,13 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
                     const newMap = { ...attendanceMap };
 
                     for (const emp of employees) {
+                      const empJob = getEmployeeJob(emp.employee_id);
                       const mark = dailyMarks[emp.employee_id] || {
                         status: 'P',
                         ot: 0,
                         trade: getEmployeeTrade(emp),
+                        job_id: empJob.job_id || '',
+                        job_number: empJob.job_number || '',
                       };
                       const record: AttendanceRecord = {
                         employee_id: emp.employee_id,
@@ -1252,6 +1463,8 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
                         trade: mark.trade,
                         shift_hours: mark.status === 'P' ? 8 : mark.status === 'V' ? 8 : 0,
                         ot_hours: mark.ot,
+                        job_id: mark.job_id || '',
+                        job_number: mark.job_number || '',
                       };
                       newMap[`${emp.employee_id}_${dateStr}`] = record;
                       itemsToSave.push(record);
@@ -1359,6 +1572,30 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
                   Additional overtime beyond the standard 8-hour shift.
                 </span>
               </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1">Job Order Assignment:</label>
+                <select
+                  value={activeCellEdit.currentJobId || ''}
+                  onChange={(e) => {
+                    const nextJobId = e.target.value;
+                    const matched = availableJobs.find((j: any) => j.job_id === nextJobId);
+                    setActiveCellEdit({
+                      ...activeCellEdit,
+                      currentJobId: nextJobId,
+                      currentJobNumber: matched?.job_number || '',
+                    });
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-amber-300 text-xs focus:ring-1 focus:ring-amber-500"
+                >
+                  <option value="">General / Unassigned</option>
+                  {availableJobs.map((j: any) => (
+                    <option key={j.job_id} value={j.job_id}>
+                      {j.job_number} — {j.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
@@ -1387,6 +1624,8 @@ export const MonthlyAttendanceModule: React.FC<MonthlyAttendanceModuleProps> = (
                       trade,
                       shift_hours: activeCellEdit.currentStatus === 'P' ? 8 : activeCellEdit.currentStatus === 'V' ? 8 : 0,
                       ot_hours: activeCellEdit.currentOt,
+                      job_id: activeCellEdit.currentJobId || '',
+                      job_number: activeCellEdit.currentJobNumber || '',
                     },
                   }));
                   setHasUnsavedChanges(true);

@@ -236,6 +236,14 @@ export default function App() {
     try {
       const data = await safeFetchJson<SessionData>('/api/auth/session');
       if (data) {
+        if (typeof window !== 'undefined') {
+          if (data.company?.company_id) {
+            window.localStorage.setItem('cemcon_company_id', data.company.company_id);
+          }
+          if (data.session?.userId) {
+            window.localStorage.setItem('cemcon_user_id', data.session.userId);
+          }
+        }
         setSession(data);
       }
       const saData = await safeFetchJson<any>('/api/sheets/service-account');
@@ -252,12 +260,32 @@ export default function App() {
   // Switch company handler
   const switchCompany = async (companyId: string) => {
     try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('cemcon_company_id', companyId);
+      }
+      // Immediately clear stale company-scoped arrays to guarantee zero cross-company leak
+      setDepartments([]);
+      setEmployees([]);
+      setJobs([]);
+      setCustomers([]);
+      setAccounts([]);
+      setJournals([]);
+      setTrialBalance(null);
+      setItems([]);
+      setWarehouses([]);
+      setStockBalances([]);
+      setInvTransactions([]);
+      setPendingApprovals([]);
+      setAuditLogs([]);
+      setSelectedDeptFilter('ALL');
+
       const res = await fetch('/api/auth/switch-company', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ companyId }),
       });
       if (res.ok) {
+        await fetchSession();
         setRefreshTrigger((prev) => prev + 1);
       }
     } catch (err) {
@@ -268,6 +296,9 @@ export default function App() {
   // Switch user persona
   const switchUser = async (userId: string) => {
     try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('cemcon_user_id', userId);
+      }
       const res = await fetch('/api/auth/switch-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -287,6 +318,7 @@ export default function App() {
         } else if (userId === 'user-eng-003') {
           setActiveTab('jobs');
         }
+        await fetchSession();
         setRefreshTrigger((prev) => prev + 1);
       }
     } catch (err) {
@@ -294,44 +326,70 @@ export default function App() {
     }
   };
 
-  // Load active tab data
+  // Load active tab data + always keep core master lists synchronized per company
   useEffect(() => {
     if (!session?.company?.company_id) return;
+
+    // Always keep core master data fresh across all tabs (Overview, HR, Attendance, Salary, Jobs, Accounting)
+    safeFetchJson<{ data: any[] }>('/api/departments').then((d) => {
+      if (d?.data) setDepartments(d.data);
+    });
+    safeFetchJson<{ data: any[] }>('/api/employees').then((d) => {
+      if (d?.data) setEmployees(d.data);
+    });
+    safeFetchJson<{ data: any[] }>('/api/jobs').then((d) => {
+      if (d?.data) setJobs(d.data);
+    });
+    safeFetchJson<{ data: any[] }>('/api/customers').then((d) => {
+      if (d?.data) setCustomers(d.data);
+    });
 
     // Background load reminders for bell badge
     safeFetchJson<any[]>('/api/reminders/scan').then((data) => setReminders(data || []));
 
-    if (activeTab === 'overview' || activeTab === 'departments') {
-      safeFetchJson<{ data: any[] }>('/api/departments').then((d) => setDepartments(d?.data || []));
-      safeFetchJson<{ data: any[] }>('/api/employees').then((d) => setEmployees(d?.data || []));
-    }
-
-    if (activeTab === 'overview' || activeTab === 'jobs') {
-      safeFetchJson<{ data: any[] }>('/api/jobs').then((d) => setJobs(d?.data || []));
-      safeFetchJson<{ data: any[] }>('/api/customers').then((d) => setCustomers(d?.data || []));
-    }
-
     if (activeTab === 'overview' || activeTab === 'accounting') {
-      safeFetchJson<{ data: any[] }>('/api/accounting/accounts').then((d) => setAccounts(d?.data || []));
-      safeFetchJson<{ data: any[] }>('/api/accounting/journals').then((d) => setJournals(d?.data || []));
-      safeFetchJson<any>('/api/accounting/trial-balance').then((d) => setTrialBalance(d));
+      safeFetchJson<{ data: any[] }>('/api/accounting/accounts').then((d) => {
+        if (d?.data) setAccounts(d.data);
+      });
+      safeFetchJson<{ data: any[] }>('/api/accounting/journals').then((d) => {
+        if (d?.data) setJournals(d.data);
+      });
+      safeFetchJson<any>('/api/accounting/trial-balance').then((d) => {
+        if (d) setTrialBalance(d);
+      });
     }
 
     if (activeTab === 'overview' || activeTab === 'inventory') {
-      safeFetchJson<{ data: any[] }>('/api/inventory/items').then((d) => setItems(d?.data || []));
-      safeFetchJson<{ data: any[] }>('/api/inventory/warehouses').then((d) => setWarehouses(d?.data || []));
-      safeFetchJson<any[]>('/api/inventory/stock-balances').then((d) => setStockBalances(d || []));
-      safeFetchJson<{ data: any[] }>('/api/inventory/transactions').then((d) => setInvTransactions(d?.data || []));
+      safeFetchJson<{ data: any[] }>('/api/inventory/items').then((d) => {
+        if (d?.data) setItems(d.data);
+      });
+      safeFetchJson<{ data: any[] }>('/api/inventory/warehouses').then((d) => {
+        if (d?.data) setWarehouses(d.data);
+      });
+      safeFetchJson<any[]>('/api/inventory/stock-balances').then((d) => {
+        if (d) setStockBalances(d);
+      });
+      safeFetchJson<{ data: any[] }>('/api/inventory/transactions').then((d) => {
+        if (d?.data) setInvTransactions(d.data);
+      });
     }
 
     if (activeTab === 'overview' || activeTab === 'approvals') {
-      safeFetchJson<{ data: any[] }>('/api/approvals/pending').then((d) => setPendingApprovals(d?.data || []));
-      safeFetchJson<{ data: any[] }>('/api/audit-logs').then((d) => setAuditLogs(d?.data || []));
+      safeFetchJson<{ data: any[] }>('/api/approvals/pending').then((d) => {
+        if (d?.data) setPendingApprovals(d.data);
+      });
+      safeFetchJson<{ data: any[] }>('/api/audit-logs').then((d) => {
+        if (d?.data) setAuditLogs(d.data);
+      });
     }
 
     if (activeTab === 'sheets' || activeTab === 'overview') {
-      safeFetchJson<string[]>('/api/sheets/tabs').then((d) => setSheetsTabs(d || []));
-      safeFetchJson<any>('/api/sheets/service-account').then((d) => setServiceAccountInfo(d));
+      safeFetchJson<string[]>('/api/sheets/tabs').then((d) => {
+        if (d) setSheetsTabs(d);
+      });
+      safeFetchJson<any>('/api/sheets/service-account').then((d) => {
+        if (d) setServiceAccountInfo(d);
+      });
       loadSheetTab(selectedSheetTab);
     }
 
@@ -384,6 +442,10 @@ export default function App() {
       });
 
       if (res.ok) {
+        const createdJob = await res.json().catch(() => null);
+        if (createdJob && createdJob.job_id) {
+          setJobs((prev) => [createdJob, ...prev.filter((j) => j.job_id !== createdJob.job_id)]);
+        }
         setIsCreatingJob(false);
         setNewJobTitle('');
         setNewJobScope('');
@@ -496,6 +558,10 @@ export default function App() {
       });
 
       if (res.ok) {
+        const result = await res.json().catch(() => null);
+        if (result?.journal) {
+          setJournals((prev) => [result.journal, ...prev.filter((j) => j.journal_id !== result.journal.journal_id)]);
+        }
         setIsPostingJournal(false);
         setJournalMemo('');
         setJournalLines([
@@ -624,6 +690,10 @@ export default function App() {
         }),
       });
       if (res.ok) {
+        const createdDept = await res.json().catch(() => null);
+        if (createdDept && createdDept.department_id) {
+          setDepartments((prev) => [...prev.filter((d) => d.department_id !== createdDept.department_id), createdDept]);
+        }
         setIsCreatingDept(false);
         setNewDeptName('');
         setNewDeptCode('');
@@ -662,6 +732,10 @@ export default function App() {
         }),
       });
       if (res.ok) {
+        const createdEmp = await res.json().catch(() => null);
+        if (createdEmp && createdEmp.employee_id) {
+          setEmployees((prev) => [createdEmp, ...prev.filter((emp) => emp.employee_id !== createdEmp.employee_id)]);
+        }
         setIsCreatingEmp(false);
         setNewEmpNo('');
         setNewEmpName('');
@@ -697,6 +771,10 @@ export default function App() {
         }),
       });
       if (res.ok) {
+        const updatedEmp = await res.json().catch(() => null);
+        if (updatedEmp && updatedEmp.employee_id) {
+          setEmployees((prev) => prev.map((emp) => (emp.employee_id === updatedEmp.employee_id ? updatedEmp : emp)));
+        }
         setRefreshTrigger((prev) => prev + 1);
       } else {
         const errMsg = await safeExtractError(res, 'Failed to update employee status');
@@ -1271,9 +1349,21 @@ export default function App() {
                   </div>
                 ) : (
                   <HRAdministrationModule
+                    key={`hr-suite-${session?.company?.company_id || 'default'}`}
                     session={session}
                     departments={departments}
                     employees={employees}
+                    jobs={jobs}
+                    onEmployeeCreated={(createdEmp) => {
+                      if (createdEmp?.employee_id) {
+                        setEmployees((prev) => [createdEmp, ...prev.filter((e) => e.employee_id !== createdEmp.employee_id)]);
+                      }
+                    }}
+                    onEmployeeStatusUpdated={(updatedEmp) => {
+                      if (updatedEmp?.employee_id) {
+                        setEmployees((prev) => prev.map((e) => (e.employee_id === updatedEmp.employee_id ? updatedEmp : e)));
+                      }
+                    }}
                     onRefreshEmployees={() => {
                       fetch('/api/employees')
                         .then((r) => r.json())
@@ -1881,9 +1971,11 @@ export default function App() {
           {/* VIEW 1B: WORKFORCE ATTENDANCE & 30-DAY MUSTER ROLL */}
           {activeTab === 'attendance' && (
             <MonthlyAttendanceModule
+              key={`att-${session?.company?.company_id || 'default'}`}
               session={session}
               departments={departments}
               employees={employees}
+              jobs={jobs}
               onRefreshEmployees={() => {
                 fetch('/api/employees')
                   .then((r) => r.json())
@@ -1898,6 +1990,7 @@ export default function App() {
           {/* VIEW 1C: SALARY & PAYROLL MODULE (AUTO-CALCULATED FROM ATTENDANCE) */}
           {activeTab === 'salary' && (
             <SalaryModule
+              key={`sal-${session?.company?.company_id || 'default'}`}
               session={session}
               departments={departments}
               employees={employees}
@@ -2127,7 +2220,10 @@ export default function App() {
                   }
                   tenantName={session?.tenant?.tenant_name || 'CEMCON Group Holding'}
                   onClose={() => setIsJobModalOpen(false)}
-                  onJobCreated={() => {
+                  onJobCreated={(newJob) => {
+                    if (newJob && newJob.job_id) {
+                      setJobs((prev) => [newJob, ...prev.filter((j) => j.job_id !== newJob.job_id)]);
+                    }
                     setIsJobModalOpen(false);
                     setRefreshTrigger((prev) => prev + 1);
                   }}
@@ -2139,6 +2235,7 @@ export default function App() {
           {/* VIEW 2B: JOB ESTIMATION SUITE (5-SECTION COSTING) */}
           {activeTab === 'estimations' && (
             <JobEstimationModule
+              key={`est-${session?.company?.company_id || 'default'}`}
               activeCompany={
                 CEMCON_COMPANIES.find(
                   (c) => c.code === session?.company?.company_code || c.name === session?.company?.company_name
@@ -2153,6 +2250,7 @@ export default function App() {
           {/* VIEW 3: ACCOUNTS & FINANCE DEPARTMENT (18-MODULE SUITE) */}
           {activeTab === 'accounting' && (
             <FinanceModule
+              key={`fin-${session?.company?.company_id || 'default'}`}
               activeCompany={
                 CEMCON_COMPANIES.find(
                   (c) => c.code === session?.company?.company_code || c.name === session?.company?.company_name
@@ -2167,6 +2265,7 @@ export default function App() {
           {/* VIEW 3B: PROCUREMENT DEPARTMENT (8-OPERATION SUITE) */}
           {activeTab === 'procurement' && (
             <ProcurementModule
+              key={`proc-${session?.company?.company_id || 'default'}`}
               activeCompany={
                 CEMCON_COMPANIES.find(
                   (c) => c.code === session?.company?.company_code || c.name === session?.company?.company_name

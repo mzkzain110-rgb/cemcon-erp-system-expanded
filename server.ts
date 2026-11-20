@@ -54,6 +54,14 @@ app.use((req, _res, next) => {
   next();
 });
 
+// Prevent browser/CDN caching on all API endpoints for immediate consistency
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
 // Initialize Database Storage
 await globalStorageAdapter.init();
 
@@ -129,8 +137,29 @@ const ENTERPRISE_USER_ROLES: Record<string, {
   },
 };
 
-// Mock Session State (In a real enterprise deployment, this is a JWT / Session store)
-// Defaults to CEMCON tenant admin at Cemcon Mechanical Engineering LLC
+const USER_PROFILES: Record<string, { email: string; name: string }> = {
+  'user-admin-001': { email: 'admin@cemcon.ae', name: 'System Administrator' },
+  'user-acc-002': { email: 'finance@cemcon.ae', name: 'Accounts & Finance Officer' },
+  'user-eng-003': { email: 'engineering@cemcon.ae', name: 'Senior Project Engineer' },
+  'user-sales-004': { email: 'shoaib@cemcon.ae', name: 'Muhammad Shoaib' },
+  'user-hr-005': { email: 'adeel@cemcon.ae', name: 'Muhammad Adeel' },
+};
+
+function parseCookies(req: Request): Record<string, string> {
+  const raw = req.headers.cookie || '';
+  const out: Record<string, string> = {};
+  raw.split(';').forEach((part) => {
+    const idx = part.indexOf('=');
+    if (idx > 0) {
+      const k = decodeURIComponent(part.slice(0, idx).trim());
+      const v = decodeURIComponent(part.slice(idx + 1).trim());
+      out[k] = v;
+    }
+  });
+  return out;
+}
+
+// Mock Session State (Defaults for fallback when headers/cookies are not provided)
 let activeSession: SecurityContext = {
   tenantId: 'tenant-cemcon-001',
   companyId: 'comp-cemcon-mech-01',
@@ -145,19 +174,34 @@ let activeSession: SecurityContext = {
   isTenantAdmin: true,
 };
 
-// Security Context Middleware: Injects and validates tenant & company scoping
+// Security Context Middleware: Statelessly resolves company & user from headers/cookies for serverless consistency
 function getSecurityContext(req: Request): SecurityContext {
+  const cookies = parseCookies(req);
   const reqTenant = req.headers['x-tenant-id'] as string;
-  const reqCompany = req.headers['x-company-id'] as string;
+  const reqCompany = (req.headers['x-company-id'] as string) || cookies['cemcon_company_id'];
+  const reqUser = (req.headers['x-user-id'] as string) || cookies['cemcon_user_id'];
 
   // Validate tenant: users can NEVER jump across tenants
   if (reqTenant && reqTenant !== activeSession.tenantId) {
     throw new Error('Forbidden: Cross-tenant access attempt detected and blocked.');
   }
 
+  const resolvedUserId = reqUser || activeSession.userId;
+  const roleConfig = ENTERPRISE_USER_ROLES[resolvedUserId];
+  const profile = USER_PROFILES[resolvedUserId];
+
   return {
-    ...activeSession,
+    tenantId: activeSession.tenantId,
     companyId: reqCompany || activeSession.companyId,
+    userId: resolvedUserId,
+    userEmail: profile?.email || activeSession.userEmail,
+    userName: profile?.name || activeSession.userName,
+    roleCode: roleConfig?.roleCode || activeSession.roleCode,
+    roleTitle: roleConfig?.roleTitle || activeSession.roleTitle,
+    departmentScope: roleConfig?.departmentScope || activeSession.departmentScope,
+    allowedDepartmentCodes: roleConfig?.allowedDepartmentCodes || activeSession.allowedDepartmentCodes,
+    permissions: roleConfig?.permissions || activeSession.permissions,
+    isTenantAdmin: roleConfig !== undefined ? roleConfig.isTenantAdmin : activeSession.isTenantAdmin,
   };
 }
 
@@ -189,11 +233,13 @@ app.get('/api/auth/session', async (req: Request, res: Response) => {
 app.post('/api/auth/switch-company', async (req: Request, res: Response) => {
   try {
     const { companyId } = req.body;
-    const company = await companyRepo.getCompany(companyId, activeSession);
+    const context = getSecurityContext(req);
+    const company = await companyRepo.getCompany(companyId, context);
     if (!company) {
       return res.status(404).json({ error: 'Company not found in this tenant.' });
     }
     activeSession.companyId = companyId;
+    res.setHeader('Set-Cookie', `cemcon_company_id=${encodeURIComponent(companyId)}; Path=/; SameSite=Lax; Max-Age=2592000`);
     res.json({ success: true, activeCompany: company });
   } catch (err: any) {
     res.status(403).json({ error: err.message });
@@ -203,7 +249,8 @@ app.post('/api/auth/switch-company', async (req: Request, res: Response) => {
 app.post('/api/auth/switch-user', async (req: Request, res: Response) => {
   try {
     const { userId } = req.body;
-    const user = await userRepo.getUser(userId, activeSession);
+    const context = getSecurityContext(req);
+    const user = await userRepo.getUser(userId, context);
     if (!user) {
       return res.status(404).json({ error: 'User not found in tenant.' });
     }
@@ -219,7 +266,7 @@ app.post('/api/auth/switch-user', async (req: Request, res: Response) => {
 
     activeSession = {
       tenantId: user.tenant_id,
-      companyId: activeSession.companyId || 'comp-cemcon-mech-01',
+      companyId: context.companyId || activeSession.companyId || 'comp-cemcon-mech-01',
       userId: user.user_id,
       userEmail: user.email,
       userName: user.full_name,
@@ -231,6 +278,7 @@ app.post('/api/auth/switch-user', async (req: Request, res: Response) => {
       isTenantAdmin: roleConfig.isTenantAdmin,
     };
 
+    res.setHeader('Set-Cookie', `cemcon_user_id=${encodeURIComponent(user.user_id)}; Path=/; SameSite=Lax; Max-Age=2592000`);
     res.json({ success: true, activeUser: user, session: activeSession });
   } catch (err: any) {
     res.status(403).json({ error: err.message });
@@ -923,6 +971,34 @@ app.get('/api/customers', async (req: Request, res: Response) => {
   }
 });
 
+app.post('/api/customers', async (req: Request, res: Response) => {
+  try {
+    const context = getSecurityContext(req);
+    const { name, customer_code, email, phone, trn_vat_number, contact_person, billing_address, credit_limit } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'Customer name is required.' });
+    }
+    const generatedCode = `CUST-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const created = await customerRepo.createCustomer(
+      {
+        name: String(name).trim(),
+        customer_code: customer_code ? String(customer_code).trim().toUpperCase() : generatedCode,
+        email: email ? String(email).trim() : 'client@cemcon.ae',
+        phone: phone ? String(phone).trim() : '',
+        trn_vat_number: trn_vat_number ? String(trn_vat_number).trim() : '',
+        contact_person: contact_person ? String(contact_person).trim() : '',
+        billing_address: billing_address ? String(billing_address).trim() : '',
+        credit_limit: credit_limit !== undefined ? Number(credit_limit) : 500000,
+        status: 'ACTIVE',
+      },
+      context
+    );
+    res.status(201).json(created);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/suppliers', async (req: Request, res: Response) => {
   try {
     const context = getSecurityContext(req);
@@ -930,6 +1006,45 @@ app.get('/api/suppliers', async (req: Request, res: Response) => {
     res.json(result);
   } catch (err: any) {
     res.status(403).json({ error: err.message });
+  }
+});
+
+app.post('/api/suppliers', async (req: Request, res: Response) => {
+  try {
+    const context = getSecurityContext(req);
+    const {
+      name,
+      supplier_code,
+      email,
+      phone,
+      trn_vat_number,
+      contact_person,
+      address,
+      payment_terms_days,
+    } = req.body || {};
+
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'Vendor / Supplier name is required.' });
+    }
+
+    const generatedCode = `SUPP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const created = await supplierRepo.createSupplier(
+      {
+        name: String(name).trim(),
+        supplier_code: supplier_code ? String(supplier_code).trim().toUpperCase() : generatedCode,
+        email: email && String(email).trim() ? String(email).trim() : 'vendor@cemcon.ae',
+        phone: phone ? String(phone).trim() : '',
+        trn_vat_number: trn_vat_number ? String(trn_vat_number).trim() : '',
+        contact_person: contact_person ? String(contact_person).trim() : '',
+        address: address ? String(address).trim() : '',
+        payment_terms_days: payment_terms_days !== undefined ? Number(payment_terms_days) : 30,
+        status: 'ACTIVE',
+      },
+      context
+    );
+    res.status(201).json(created);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -1119,7 +1234,21 @@ app.get('/api/accounting/journals/:id', async (req: Request, res: Response) => {
 app.post('/api/accounting/post-journal', async (req: Request, res: Response) => {
   try {
     const context = getSecurityContext(req);
-    const { idempotencyKey, entryDate, memo, lines, voucherType, jobId, jobNumber, job_id, job_number } = req.body;
+    const {
+      idempotencyKey,
+      entryDate,
+      memo,
+      lines,
+      voucherType,
+      jobId,
+      jobNumber,
+      job_id,
+      job_number,
+      supplierId,
+      supplierName,
+      supplier_id,
+      supplier_name,
+    } = req.body;
 
     if (!idempotencyKey || !entryDate || !memo || !lines) {
       return res.status(400).json({ error: 'idempotencyKey, entryDate, memo, and lines are required.' });
@@ -1134,6 +1263,8 @@ app.post('/api/accounting/post-journal', async (req: Request, res: Response) => 
         voucherType,
         jobId: jobId || job_id,
         jobNumber: jobNumber || job_number,
+        supplierId: supplierId || supplier_id,
+        supplierName: supplierName || supplier_name,
       },
       context
     );
@@ -1740,10 +1871,11 @@ app.get('/api/sheets/tabs', (req: Request, res: Response) => {
   res.json(result);
 });
 
-app.get('/api/sheets/tab/:tabName', (req: Request, res: Response) => {
+app.get('/api/sheets/tab/:tabName', async (req: Request, res: Response) => {
   try {
     const { tabName } = req.params;
     const schema = globalStorageAdapter.getSchema(tabName);
+    await globalStorageAdapter.readTab(tabName);
     const rawData = globalStorageAdapter.getRawSheetData(tabName);
     res.json({
       tabName,

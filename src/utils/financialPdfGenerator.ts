@@ -313,30 +313,21 @@ export function exportProfitLossPdf(params: ProfitLossPdfParams): string {
   // Section 1: Operating Revenues
   drawSectionHeader('1. Operating Revenues');
   if (params.pnl.revenueAccounts && params.pnl.revenueAccounts.length > 0) {
-    params.pnl.revenueAccounts.forEach((a) => {
+    params.pnl.revenueAccounts.filter((a) => Math.abs(a.netBalance || 0) > 0).forEach((a) => {
       drawRow(a.accountCode, a.accountName, Math.abs(a.netBalance));
     });
-  } else {
-    drawRow('4010', 'Heavy Structural Steel Fabrication Revenue', 265000.0);
-    drawRow('4020', 'ASME Pressure Vessel & Piping Revenue', 141290.0);
-    drawRow('4030', 'MEP & Site Erection Contracting Revenue', 87870.0);
   }
-  drawRow('', 'TOTAL REVENUE (TURNOVER)', params.pnl.totalRevenue || 494160.0, true, true);
+  drawRow('', 'TOTAL REVENUE (TURNOVER)', params.pnl.totalRevenue ?? 0, true, true);
   curY += 3;
 
   // Section 2: Cost of Goods Sold (Direct Costs)
   drawSectionHeader('2. Cost of Goods Sold / Direct Job Costs');
   if (params.pnl.cogsAccounts && params.pnl.cogsAccounts.length > 0) {
-    params.pnl.cogsAccounts.forEach((a) => {
+    params.pnl.cogsAccounts.filter((a) => Math.abs(a.netBalance || 0) > 0).forEach((a) => {
       drawRow(a.accountCode, a.accountName, Math.abs(a.netBalance));
     });
-  } else {
-    drawRow('5010', 'Direct Steel Plates & Structural Profiles', 85000.0);
-    drawRow('5020', 'Direct Workshop Welder & Fabricator Wages', 65000.0);
-    drawRow('5030', 'Equipment Depreciation & Machinery Fuel', 22500.0);
-    drawRow('5040', 'Third-Party NDT Radiography & Hydrotesting', 12800.0);
   }
-  drawRow('', 'TOTAL COST OF GOODS SOLD (COGS)', params.pnl.totalCOGS || 185300.0, true, true);
+  drawRow('', 'TOTAL COST OF GOODS SOLD (COGS)', params.pnl.totalCOGS ?? 0, true, true);
   curY += 2;
 
   // GROSS PROFIT HIGHLIGHT BAR
@@ -350,9 +341,9 @@ export function exportProfitLossPdf(params: ProfitLossPdfParams): string {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(30, 58, 138); // Blue 900
-  doc.text(`GROSS PROFIT (Margin: ${params.pnl.grossMarginPct || 62.5}%)`, margin + 4, curY + 4.8);
+  doc.text(`GROSS PROFIT (Margin: ${params.pnl.grossMarginPct ?? 0}%)`, margin + 4, curY + 4.8);
   doc.text(
-    params.pnl.grossProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    (params.pnl.grossProfit ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     pageWidth - margin - 4,
     curY + 4.8,
     { align: 'right' }
@@ -362,21 +353,15 @@ export function exportProfitLossPdf(params: ProfitLossPdfParams): string {
   // Section 3: Operating Expenses (OPEX)
   drawSectionHeader('3. General, Administrative & Operating Expenses');
   if (params.pnl.opexAccounts && params.pnl.opexAccounts.length > 0) {
-    params.pnl.opexAccounts.forEach((a) => {
+    params.pnl.opexAccounts.filter((a) => Math.abs(a.netBalance || 0) > 0).forEach((a) => {
       drawRow(a.accountCode, a.accountName, Math.abs(a.netBalance));
     });
-  } else {
-    drawRow('6010', 'Executive & Administrative Salaries', 55000.0);
-    drawRow('6020', 'Fabrication Yard Rent & Municipal Taxes', 28000.0);
-    drawRow('6030', 'DEWA Industrial Utilities & Power', 15540.0);
-    drawRow('6040', 'Fleet Maintenance, Diesel & Road Tolls', 8750.0);
-    drawRow('6050', 'Workmen Compensation & Health Insurance', 12400.0);
   }
-  drawRow('', 'TOTAL OPERATING EXPENSES', params.pnl.totalOpex || 119690.0, true, true);
+  drawRow('', 'TOTAL OPERATING EXPENSES', params.pnl.totalOpex ?? 0, true, true);
   curY += 3;
 
   // Operating Profit
-  drawRow('', 'OPERATING PROFIT BEFORE CORPORATE TAX (EBIT)', params.pnl.operatingProfit || 189170.0, true, true);
+  drawRow('', 'OPERATING PROFIT BEFORE CORPORATE TAX (EBIT)', params.pnl.operatingProfit ?? 0, true, true);
   curY += 2;
 
   // Corporate Tax Section
@@ -406,9 +391,9 @@ export function exportProfitLossPdf(params: ProfitLossPdfParams): string {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(6, 78, 59); // Emerald 900
-  doc.text(`NET PROFIT FOR THE PERIOD (Net Margin: ${params.pnl.netMarginPct || 38.3}%)`, margin + 4, curY + 5.2);
+  doc.text(`NET PROFIT FOR THE PERIOD (Net Margin: ${params.pnl.netMarginPct ?? 0}%)`, margin + 4, curY + 5.2);
   doc.text(
-    `AED ${params.pnl.netProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    `AED ${(params.pnl.netProfit ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     pageWidth - margin - 4,
     curY + 5.2,
     { align: 'right' }
@@ -514,18 +499,11 @@ export function exportBalanceSheetPdf(params: BalanceSheetPdfParams): string {
   curY += 5;
 
   if (params.balanceSheet.currentAssets && params.balanceSheet.currentAssets.length > 0) {
-    params.balanceSheet.currentAssets.forEach((a) => {
+    params.balanceSheet.currentAssets.filter((a) => Math.abs(a.netBalance || 0) > 0).forEach((a) => {
       drawRow(a.accountCode, a.accountName, a.netBalance);
     });
-  } else {
-    drawRow('1010', 'Cash and Bank - Emirates NBD Corporate (AED)', 943564.5);
-    drawRow('1018', 'Petty Cash Operating Float - Al Quoz Yard', 12500.0);
-    drawRow('1020', 'Accounts Receivable (Trade Debtors)', 329850.0);
-    drawRow('1030', 'Post-Dated Cheques in Safe (Receivable)', 145000.0);
-    drawRow('1040', 'Raw Material Inventory & Structural Steel', 42750.0);
-    drawRow('1050', 'Advances & Security Deposits to Suppliers', 25000.0);
   }
-  drawRow('', 'TOTAL CURRENT ASSETS', params.balanceSheet.totalCurrentAssets || 1498664.5, true, true);
+  drawRow('', 'TOTAL CURRENT ASSETS', params.balanceSheet.totalCurrentAssets ?? 0, true, true);
   curY += 3;
 
   // Non-Current Assets
@@ -536,17 +514,11 @@ export function exportBalanceSheetPdf(params: BalanceSheetPdfParams): string {
   curY += 5;
 
   if (params.balanceSheet.nonCurrentAssets && params.balanceSheet.nonCurrentAssets.length > 0) {
-    params.balanceSheet.nonCurrentAssets.forEach((a) => {
+    params.balanceSheet.nonCurrentAssets.filter((a) => Math.abs(a.netBalance || 0) > 0).forEach((a) => {
       drawRow(a.accountCode, a.accountName, a.netBalance);
     });
-  } else {
-    drawRow('1510', 'Workshop Land & Fabrication Yard Facilities', 450000.0);
-    drawRow('1520', 'Heavy Cranes & Overhead Gantry Equipment', 280000.0);
-    drawRow('1530', 'CNC Plasma Cutting & Hydraulic Press Machinery', 190000.0);
-    drawRow('1540', 'Commercial Fleet Trucks & Heavy Trailers', 140000.0);
-    drawRow('1590', 'Less: Accumulated Depreciation', -95000.0);
   }
-  drawRow('', 'TOTAL NON-CURRENT ASSETS', params.balanceSheet.totalNonCurrentAssets || 965000.0, true, true);
+  drawRow('', 'TOTAL NON-CURRENT ASSETS', params.balanceSheet.totalNonCurrentAssets ?? 0, true, true);
   curY += 2;
 
   // TOTAL ASSETS
@@ -562,7 +534,7 @@ export function exportBalanceSheetPdf(params: BalanceSheetPdfParams): string {
   doc.setTextColor(30, 58, 138);
   doc.text('TOTAL ASSETS', margin + 4, curY + 4.8);
   doc.text(
-    `AED ${params.balanceSheet.totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    `AED ${(params.balanceSheet.totalAssets ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     pageWidth - margin - 4,
     curY + 4.8,
     { align: 'right' }
@@ -580,17 +552,11 @@ export function exportBalanceSheetPdf(params: BalanceSheetPdfParams): string {
   curY += 5;
 
   if (params.balanceSheet.currentLiabilities && params.balanceSheet.currentLiabilities.length > 0) {
-    params.balanceSheet.currentLiabilities.forEach((a) => {
+    params.balanceSheet.currentLiabilities.filter((a) => Math.abs(a.netBalance || 0) > 0).forEach((a) => {
       drawRow(a.accountCode, a.accountName, Math.abs(a.netBalance));
     });
-  } else {
-    drawRow('2010', 'Accounts Payable (Trade Creditors)', 108700.0);
-    drawRow('2020', 'VAT Payable (UAE FTA 5%)', 21124.5);
-    drawRow('2030', 'Post-Dated Cheques Issued (Payable)', 87500.0);
-    drawRow('2040', 'Accrued Salaries & Workshop Wages', 48000.0);
-    drawRow('2050', 'Customer Advances & Mobilization Deposits', 45000.0);
   }
-  drawRow('', 'TOTAL CURRENT LIABILITIES', params.balanceSheet.totalCurrentLiabilities || 310324.5, true, true);
+  drawRow('', 'TOTAL CURRENT LIABILITIES', params.balanceSheet.totalCurrentLiabilities ?? 0, true, true);
   curY += 3;
 
   // Long-Term Liabilities
@@ -601,32 +567,25 @@ export function exportBalanceSheetPdf(params: BalanceSheetPdfParams): string {
   curY += 5;
 
   if (params.balanceSheet.longTermLiabilities && params.balanceSheet.longTermLiabilities.length > 0) {
-    params.balanceSheet.longTermLiabilities.forEach((a) => {
+    params.balanceSheet.longTermLiabilities.filter((a) => Math.abs(a.netBalance || 0) > 0).forEach((a) => {
       drawRow(a.accountCode, a.accountName, Math.abs(a.netBalance));
     });
-  } else {
-    drawRow('2510', 'Bank Term Facility (Heavy Machinery Financing)', 185000.0);
-    drawRow('2520', 'Provision for End of Service Indemnity (EOSB)', 78000.0);
   }
-  drawRow('', 'TOTAL LONG-TERM LIABILITIES', params.balanceSheet.totalLongTermLiabilities || 263000.0, true, true);
+  drawRow('', 'TOTAL LONG-TERM LIABILITIES', params.balanceSheet.totalLongTermLiabilities ?? 0, true, true);
   curY += 3;
 
-  drawRow('', 'TOTAL LIABILITIES', params.balanceSheet.totalLiabilities || 573324.5, true, true);
+  drawRow('', 'TOTAL LIABILITIES', params.balanceSheet.totalLiabilities ?? 0, true, true);
   curY += 3;
 
   // 3. SHAREHOLDERS EQUITY
   drawSectionHeader('3. SHAREHOLDERS EQUITY');
   if (params.balanceSheet.baseEquity && params.balanceSheet.baseEquity.length > 0) {
-    params.balanceSheet.baseEquity.forEach((a) => {
+    params.balanceSheet.baseEquity.filter((a) => Math.abs(a.netBalance || 0) > 0).forEach((a) => {
       drawRow(a.accountCode, a.accountName, Math.abs(a.netBalance));
     });
-  } else {
-    drawRow('3010', 'Paid-up Share Capital (1,000 shares @ AED 1,000)', 1000000.0);
-    drawRow('3020', 'Statutory Legal Reserve', 150000.0);
-    drawRow('3030', 'Retained Earnings Prior Periods', 551170.0);
   }
-  drawRow('', 'Current Period Net Profit (from P&L)', params.balanceSheet.currentPeriodProfit || 189170.0);
-  drawRow('', 'TOTAL SHAREHOLDERS EQUITY', params.balanceSheet.totalEquity || 1890340.0, true, true);
+  drawRow('', 'Current Period Net Profit (from P&L)', params.balanceSheet.currentPeriodProfit ?? 0);
+  drawRow('', 'TOTAL SHAREHOLDERS EQUITY', params.balanceSheet.totalEquity ?? 0, true, true);
   curY += 3;
 
   // TOTAL LIABILITIES & EQUITY
@@ -642,7 +601,7 @@ export function exportBalanceSheetPdf(params: BalanceSheetPdfParams): string {
   doc.setTextColor(20, 83, 45);
   doc.text('TOTAL LIABILITIES & EQUITY', margin + 4, curY + 5);
   doc.text(
-    `AED ${params.balanceSheet.totalLiabilitiesAndEquity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    `AED ${(params.balanceSheet.totalLiabilitiesAndEquity ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     pageWidth - margin - 4,
     curY + 5,
     { align: 'right' }

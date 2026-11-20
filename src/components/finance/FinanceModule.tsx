@@ -111,6 +111,15 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
   const [newVoucherMemo, setNewVoucherMemo] = useState('');
   const [isJobwiseEntry, setIsJobwiseEntry] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState('');
+  const [selectedSupplierId, setSelectedSupplierId] = useState('');
+  const [isAddingVendorInline, setIsAddingVendorInline] = useState(false);
+  const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
+  const [newVendorName, setNewVendorName] = useState('');
+  const [newVendorTrn, setNewVendorTrn] = useState('');
+  const [newVendorTerms, setNewVendorTerms] = useState(30);
+  const [newVendorEmail, setNewVendorEmail] = useState('');
+  const [newVendorPhone, setNewVendorPhone] = useState('');
+  const [creatingVendor, setCreatingVendor] = useState(false);
   const [newVoucherLines, setNewVoucherLines] = useState<Array<{ accountId: string; debit: number; credit: number; lineMemo: string; jobId?: string; jobNumber?: string }>>([
     { accountId: '', debit: 0, credit: 0, lineMemo: '', jobId: '', jobNumber: '' },
     { accountId: '', debit: 0, credit: 0, lineMemo: '', jobId: '', jobNumber: '' },
@@ -164,6 +173,8 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
     }
     setIsJobwiseEntry(false);
     setSelectedJobId('');
+    setSelectedSupplierId('');
+    setIsAddingVendorInline(false);
     setIsVoucherModalOpen(true);
   };
 
@@ -179,7 +190,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
   const [newInvDueDate, setNewInvDueDate] = useState('');
 
   const [isRecModalOpen, setIsRecModalOpen] = useState(false);
-  const [recStatementBalance, setRecStatementBalance] = useState(1043564.5);
+  const [recStatementBalance, setRecStatementBalance] = useState(0);
 
   const [viewingVoucher, setViewingVoucher] = useState<any | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -195,8 +206,34 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
     }
   }, [jobs]);
 
-  // Load Financial Data
+  // Load Financial Data (re-fetches and resets cleanly on activeCompany switch)
   useEffect(() => {
+    let isCancelled = false;
+    setAccounts([]);
+    setBankAccounts([]);
+    setBankTransactions([]);
+    setBankReconciliations([]);
+    setReceipts([]);
+    setPayments([]);
+    setJournals([]);
+    setQuotations([]);
+    setPurchaseInvoices([]);
+    setSalesInvoices([]);
+    setDeliveryNotes([]);
+    setCustomers([]);
+    setSuppliers([]);
+    setAgingData(null);
+    setGeneralLedger([]);
+    setTrialBalance(null);
+    setPnlData(null);
+    setBalanceSheetData(null);
+    setCashFlowData(null);
+    setFinancialMetrics(null);
+    setSelectedGlAccountId('');
+    setSelectedJobFilter('ALL');
+    setSelectedSupplierId('');
+    setRecStatementBalance(0);
+
     const fetchFinanceData = async () => {
       setLoading(true);
       try {
@@ -246,37 +283,49 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
           fetch('/api/jobs').then((r) => r.json()).catch(() => ({ data: [] })),
         ]);
 
-        if (accountsRes.data) setAccounts(accountsRes.data);
-        if (bankAccRes.data) setBankAccounts(bankAccRes.data);
-        if (bankTxRes.data) setBankTransactions(bankTxRes.data);
-        if (bankRecRes.data) setBankReconciliations(bankRecRes.data);
-        if (receiptsRes.data) setReceipts(receiptsRes.data);
-        if (paymentsRes.data) setPayments(paymentsRes.data);
-        if (journalsRes.data) setJournals(journalsRes.data);
-        if (quotesRes.data) setQuotations(quotesRes.data);
-        if (pinvRes.data) setPurchaseInvoices(pinvRes.data);
-        if (sinvRes.data) setSalesInvoices(sinvRes.data);
-        if (dnRes.data) setDeliveryNotes(dnRes.data);
-        if (custRes.data) setCustomers(custRes.data);
-        if (suppRes.data) setSuppliers(suppRes.data);
-        if (agingRes.ar) setAgingData(agingRes);
+        if (isCancelled) return;
+        setAccounts(accountsRes.data || []);
+        setBankAccounts(bankAccRes.data || []);
+        setBankTransactions(bankTxRes.data || []);
+        setBankReconciliations(bankRecRes.data || []);
+        setReceipts(receiptsRes.data || []);
+        setPayments(paymentsRes.data || []);
+        setJournals(journalsRes.data || []);
+        setQuotations(quotesRes.data || []);
+        setPurchaseInvoices(pinvRes.data || []);
+        setSalesInvoices(sinvRes.data || []);
+        setDeliveryNotes(dnRes.data || []);
+        setCustomers(custRes.data || []);
+        setSuppliers(suppRes.data || []);
+        if (agingRes?.ar) setAgingData(agingRes);
         if (Array.isArray(glRes)) setGeneralLedger(glRes);
-        if (tbRes.report) setTrialBalance(tbRes);
-        if (pnlRes.totalRevenue !== undefined) setPnlData(pnlRes);
-        if (bsRes.totalAssets !== undefined) setBalanceSheetData(bsRes);
-        if (cfRes.operating) setCashFlowData(cfRes);
-        if (fmRes.ratios) setFinancialMetrics(fmRes);
+        if (tbRes?.report) setTrialBalance(tbRes);
+        if (pnlRes?.totalRevenue !== undefined) setPnlData(pnlRes);
+        if (bsRes?.totalAssets !== undefined) setBalanceSheetData(bsRes);
+        if (cfRes?.operating) setCashFlowData(cfRes);
+        if (fmRes?.ratios) setFinancialMetrics(fmRes);
         if (jobsRes?.data) setJobsList(jobsRes.data);
         else if (Array.isArray(jobsRes)) setJobsList(jobsRes);
+
+        const latestRec = bankRecRes?.data?.[0];
+        if (latestRec?.statement_balance !== undefined) {
+          setRecStatementBalance(Number(latestRec.statement_balance || 0));
+        } else {
+          const bankGl = (tbRes?.report || []).find((a: any) => a.accountCode === '1010');
+          setRecStatementBalance(Number(bankGl?.netBalance || 0));
+        }
       } catch (err) {
         console.error('Error fetching finance data:', err);
       } finally {
-        setLoading(false);
+        if (!isCancelled) setLoading(false);
       }
     };
 
     fetchFinanceData();
-  }, [refreshTrigger]);
+    return () => {
+      isCancelled = true;
+    };
+  }, [refreshTrigger, activeCompany?.code, activeCompany?.name]);
 
   // PRINT HANDLER
   const printContent = (elementId: string, title: string) => {
@@ -372,6 +421,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
 
     const chosenJob = isJobwiseEntry && selectedJobId ? jobsList.find((j) => j.job_id === selectedJobId) : null;
     const headerJobNumber = chosenJob ? (chosenJob.job_number || chosenJob.jobNumber) : undefined;
+    const chosenVendor = selectedSupplierId ? suppliers.find((s) => s.supplier_id === selectedSupplierId) : null;
 
     if (isJobwiseEntry && !selectedJobId && !newVoucherLines.some((l) => l.jobId)) {
       setVoucherError('Please select a Job Order for this Jobwise Journal Entry (or assign a Job per line).');
@@ -389,6 +439,8 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
           voucherType: newVoucherType,
           jobId: isJobwiseEntry ? selectedJobId || undefined : undefined,
           jobNumber: headerJobNumber,
+          supplierId: selectedSupplierId || undefined,
+          supplierName: chosenVendor?.name || undefined,
           lines: newVoucherLines.map((l) => {
             const lineJob = l.jobId ? jobsList.find((j) => j.job_id === l.jobId) : null;
             const lineJobNum = lineJob ? (lineJob.job_number || lineJob.jobNumber) : (l.jobNumber || headerJobNumber);
@@ -399,16 +451,27 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               lineMemo: l.lineMemo,
               jobId: l.jobId || (isJobwiseEntry ? selectedJobId : undefined) || undefined,
               jobNumber: lineJobNum || undefined,
+              supplierId: selectedSupplierId || undefined,
+              supplierName: chosenVendor?.name || undefined,
             };
           }),
         }),
       });
 
       if (res.ok) {
+        const result = await res.json();
+        if (result?.journal) {
+          setJournals((prev) => [
+            result.journal,
+            ...prev.filter((j) => j.journal_id !== result.journal.journal_id),
+          ]);
+        }
         setIsVoucherModalOpen(false);
         setNewVoucherMemo('');
         setIsJobwiseEntry(false);
         setSelectedJobId('');
+        setSelectedSupplierId('');
+        setIsAddingVendorInline(false);
         setNewVoucherLines([
           { accountId: '', debit: 0, credit: 0, lineMemo: '', jobId: '', jobNumber: '' },
           { accountId: '', debit: 0, credit: 0, lineMemo: '', jobId: '', jobNumber: '' },
@@ -430,6 +493,50 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
     }
   };
 
+  // CREATE VENDOR / SUPPLIER (Inline in Journal Entry or Suppliers Tab)
+  const handleCreateVendor = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!newVendorName.trim()) {
+      setVoucherError('Vendor / Supplier company name is required.');
+      return;
+    }
+    setCreatingVendor(true);
+    setVoucherError(null);
+    try {
+      const res = await fetch('/api/suppliers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newVendorName.trim(),
+          trn_vat_number: newVendorTrn.trim(),
+          payment_terms_days: Number(newVendorTerms) || 30,
+          email: newVendorEmail.trim(),
+          phone: newVendorPhone.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const created = data.data || data;
+        setSuppliers((prev) => [created, ...prev.filter((s) => s.supplier_id !== created.supplier_id)]);
+        setSelectedSupplierId(created.supplier_id);
+        setIsAddingVendorInline(false);
+        setIsVendorModalOpen(false);
+        setNewVendorName('');
+        setNewVendorTrn('');
+        setNewVendorTerms(30);
+        setNewVendorEmail('');
+        setNewVendorPhone('');
+        showToast(`Vendor "${created.name}" (${created.supplier_code}) saved to Google Sheets & selected!`);
+      } else {
+        setVoucherError(data.error || 'Failed to create vendor');
+      }
+    } catch (err: any) {
+      setVoucherError(err.message || 'Network error while creating vendor');
+    } finally {
+      setCreatingVendor(false);
+    }
+  };
+
   // CREATE ACCOUNT
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -445,6 +552,11 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
         }),
       });
       if (res.ok) {
+        const created = await res.json();
+        const createdAcc = created?.data || created;
+        if (createdAcc?.account_id) {
+          setAccounts((prev) => [...prev, createdAcc]);
+        }
         setIsAccountModalOpen(false);
         setNewAccountCode('');
         setNewAccountName('');
@@ -452,10 +564,10 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
         setRefreshTrigger((prev) => prev + 1);
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to create account');
+        showToast(err.error || 'Failed to create account');
       }
     } catch (err: any) {
-      alert(err.message);
+      showToast(err.message);
     }
   };
 
@@ -570,19 +682,19 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
             <div className="bg-slate-950/70 border border-slate-800 rounded-xl px-3 py-2 text-right">
               <div className="text-[10px] text-slate-400 uppercase tracking-wider">Gross Turnover</div>
               <div className="text-sm font-bold text-white font-mono">
-                AED {(pnlData?.totalRevenue || 494160).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                AED {(pnlData?.totalRevenue ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
               </div>
             </div>
             <div className="bg-slate-950/70 border border-slate-800 rounded-xl px-3 py-2 text-right">
-              <div className="text-[10px] text-slate-400 uppercase tracking-wider">Bank Balance (ENBD)</div>
+              <div className="text-[10px] text-slate-400 uppercase tracking-wider">Current Assets / Cash</div>
               <div className="text-sm font-bold text-emerald-400 font-mono">
-                AED {(balanceSheetData?.totalCurrentAssets || 1498664.5).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                AED {(balanceSheetData?.totalCurrentAssets ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
               </div>
             </div>
             <div className="bg-slate-950/70 border border-slate-800 rounded-xl px-3 py-2 text-right">
               <div className="text-[10px] text-slate-400 uppercase tracking-wider">Net Profit Margin</div>
               <div className="text-sm font-bold text-indigo-400 font-mono">
-                {pnlData?.netMarginPct || 38.3}%
+                {pnlData?.netMarginPct ?? 0}%
               </div>
             </div>
           </div>
@@ -827,25 +939,43 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-              <div className="text-[11px] text-slate-400 uppercase tracking-wider font-medium">Bank Statement Balance</div>
-              <div className="text-2xl font-bold text-white font-mono mt-1">AED 1,043,564.50</div>
-              <div className="text-[11px] text-slate-500 mt-1">Emirates NBD Corporate · Closing As of 28-Feb-2026</div>
-            </div>
-            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-              <div className="text-[11px] text-slate-400 uppercase tracking-wider font-medium">General Ledger Balance</div>
-              <div className="text-2xl font-bold text-white font-mono mt-1">AED 1,043,564.50</div>
-              <div className="text-[11px] text-slate-500 mt-1">Account 1010 · Cash & Bank Corporate</div>
-            </div>
-            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-              <div className="text-[11px] text-slate-400 uppercase tracking-wider font-medium">Reconciliation Variance</div>
-              <div className="text-2xl font-bold text-emerald-400 font-mono mt-1 flex items-center gap-1.5">
-                <CheckCircle2 className="h-6 w-6" /> 0.00 AED
+          {(() => {
+            const primaryBank = bankAccounts[0];
+            const bankGlAcc = trialBalance?.report?.find((t: any) => t.accountCode === '1010');
+            const liveGlBalance = Number(bankGlAcc?.netBalance ?? 0);
+            const latestCert = bankReconciliations[0];
+            const stmtBal = latestCert ? Number(latestCert.statement_balance ?? 0) : Number(recStatementBalance ?? 0);
+            const variance = stmtBal - liveGlBalance;
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
+                  <div className="text-[11px] text-slate-400 uppercase tracking-wider font-medium">Bank Statement Balance</div>
+                  <div className="text-2xl font-bold text-white font-mono mt-1">
+                    AED {stmtBal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1">
+                    {primaryBank?.bank_name || activeCompany.name} {latestCert?.reconciled_date ? `· As of ${latestCert.reconciled_date}` : '· Current Period'}
+                  </div>
+                </div>
+                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
+                  <div className="text-[11px] text-slate-400 uppercase tracking-wider font-medium">General Ledger Balance</div>
+                  <div className="text-2xl font-bold text-white font-mono mt-1">
+                    AED {liveGlBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1">Account 1010 · Cash & Bank Corporate</div>
+                </div>
+                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
+                  <div className="text-[11px] text-slate-400 uppercase tracking-wider font-medium">Reconciliation Variance</div>
+                  <div className={`text-2xl font-bold font-mono mt-1 flex items-center gap-1.5 ${Math.abs(variance) < 0.01 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    <CheckCircle2 className="h-6 w-6" /> {variance.toFixed(2)} AED
+                  </div>
+                  <div className="text-[11px] text-emerald-500/80 mt-1">
+                    {Math.abs(variance) < 0.01 ? '100% Matched & Verified' : 'Pending Reconciliation Adjustment'}
+                  </div>
+                </div>
               </div>
-              <div className="text-[11px] text-emerald-500/80 mt-1">100% Fully Matched & Verified</div>
-            </div>
-          </div>
+            );
+          })()}
 
           <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-lg">
             <div className="px-4 py-3 border-b border-slate-800 text-xs font-bold text-white uppercase tracking-wider">
@@ -941,18 +1071,30 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
-                  {receipts.map((r) => (
-                    <tr key={r.receipt_id} className="hover:bg-slate-800/40">
-                      <td className="py-2.5 px-4 font-mono font-bold text-emerald-400">{r.receipt_number}</td>
-                      <td className="py-2.5 px-4 font-medium text-white">{r.customer_id === 'cust-001' ? 'Emaar Properties PJSC' : 'ADNOC Gas Processing'}</td>
-                      <td className="py-2.5 px-4 font-mono text-[11px] text-slate-300">{r.payment_method}</td>
-                      <td className="py-2.5 px-4 font-mono text-[11px] text-slate-400">{r.reference || 'N/A'}</td>
-                      <td className="py-2.5 px-4 text-right font-mono font-bold text-emerald-400">
-                        AED {Number(r.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  {receipts.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-slate-500 font-mono">
+                        No receipts recorded for {activeCompany.name} yet.
                       </td>
-                      <td className="py-2.5 px-4 text-slate-400 font-mono text-[11px]">{r.received_date}</td>
                     </tr>
-                  ))}
+                  ) : (
+                    receipts.map((r) => {
+                      const cust = customers.find((c) => c.customer_id === r.customer_id);
+                      const custName = r.customer_name || cust?.name || r.customer_id || 'Customer';
+                      return (
+                        <tr key={r.receipt_id} className="hover:bg-slate-800/40">
+                          <td className="py-2.5 px-4 font-mono font-bold text-emerald-400">{r.receipt_number}</td>
+                          <td className="py-2.5 px-4 font-medium text-white">{custName}</td>
+                          <td className="py-2.5 px-4 font-mono text-[11px] text-slate-300">{r.payment_method}</td>
+                          <td className="py-2.5 px-4 font-mono text-[11px] text-slate-400">{r.reference || 'N/A'}</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-emerald-400">
+                            AED {Number(r.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-2.5 px-4 text-slate-400 font-mono text-[11px]">{r.received_date}</td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
@@ -970,22 +1112,34 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
-                  {payments.map((p) => (
-                    <tr key={p.payment_id} className="hover:bg-slate-800/40">
-                      <td className="py-2.5 px-4 font-mono font-bold text-rose-400">{p.payment_number}</td>
-                      <td className="py-2.5 px-4 font-medium text-white">{p.supplier_id === 'supp-001' ? 'Emirates Steel Industries PJSC' : p.supplier_id === 'supp-002' ? 'Middle East Fasteners LLC' : 'DEWA Industrial Utilities'}</td>
-                      <td className="py-2.5 px-4 font-mono text-[11px] text-slate-300">{p.payment_method}</td>
-                      <td className="py-2.5 px-4 text-right font-mono font-bold text-rose-400">
-                        AED {Number(p.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="py-2.5 px-4 text-slate-400 font-mono text-[11px]">{p.payment_date}</td>
-                      <td className="py-2.5 px-4 text-center">
-                        <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          {p.status}
-                        </span>
+                  {payments.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-slate-500 font-mono">
+                        No payment disbursements recorded for {activeCompany.name} yet.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    payments.map((p) => {
+                      const supp = suppliers.find((s) => s.supplier_id === p.supplier_id);
+                      const suppName = p.supplier_name || supp?.name || p.supplier_id || 'Vendor';
+                      return (
+                        <tr key={p.payment_id} className="hover:bg-slate-800/40">
+                          <td className="py-2.5 px-4 font-mono font-bold text-rose-400">{p.payment_number}</td>
+                          <td className="py-2.5 px-4 font-medium text-white">{suppName}</td>
+                          <td className="py-2.5 px-4 font-mono text-[11px] text-slate-300">{p.payment_method}</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-rose-400">
+                            AED {Number(p.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-2.5 px-4 text-slate-400 font-mono text-[11px]">{p.payment_date}</td>
+                          <td className="py-2.5 px-4 text-center">
+                            <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                              {p.status}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1045,6 +1199,8 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                   setVoucherError(null);
                   setIsJobwiseEntry(false);
                   setSelectedJobId('');
+                  setSelectedSupplierId('');
+                  setIsAddingVendorInline(false);
                   setIsVoucherModalOpen(true);
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition"
@@ -1061,6 +1217,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                   <th className="py-2.5 px-4 font-semibold">Voucher #</th>
                   <th className="py-2.5 px-4 font-semibold">Type</th>
                   <th className="py-2.5 px-4 font-semibold">Job Order</th>
+                  <th className="py-2.5 px-4 font-semibold">Vendor / Supplier</th>
                   <th className="py-2.5 px-4 font-semibold">Date</th>
                   <th className="py-2.5 px-4 font-semibold">Narration / Memo</th>
                   <th className="py-2.5 px-4 font-semibold text-right">Debit (AED)</th>
@@ -1087,6 +1244,8 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                       vType === 'AV' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20';
                     const matchedJob = j.job_id ? jobsList.find((jb) => jb.job_id === j.job_id) : null;
                     const displayJobNo = j.job_number || matchedJob?.job_number;
+                    const matchedVendor = j.supplier_id ? suppliers.find((sp) => sp.supplier_id === j.supplier_id) : null;
+                    const displayVendorName = j.supplier_name || matchedVendor?.name;
 
                     return (
                       <tr key={j.journal_id} className="hover:bg-slate-800/40">
@@ -1104,6 +1263,15 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                             </span>
                           ) : (
                             <span className="text-[11px] text-slate-500">General</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4">
+                          {displayVendorName ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30">
+                              {displayVendorName}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-slate-600">—</span>
                           )}
                         </td>
                         <td className="py-3 px-4 text-slate-400 font-mono text-[11px]">{j.entry_date}</td>
@@ -1136,6 +1304,13 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                       </tr>
                     );
                   })}
+                {journals.length === 0 && (
+                  <tr>
+                    <td colSpan={10} className="py-8 text-center text-slate-500 font-mono">
+                      No journal entries posted for {activeCompany.name} yet. Click &ldquo;+ New Journal Entry&rdquo; to post one.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -1170,28 +1345,40 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/80">
-                {quotations.map((q) => (
-                  <tr key={q.quotation_id} className="hover:bg-slate-800/40">
-                    <td className="py-2.5 px-4 font-mono font-bold text-indigo-400">{q.quotation_no}</td>
-                    <td className="py-2.5 px-4 font-medium text-white">{q.customer_id === 'cust-001' ? 'ADNOC Gas Processing / Emaar' : 'Petrofac Emirates LLC'}</td>
-                    <td className="py-2.5 px-4 text-slate-400 font-mono text-[11px]">{q.issue_date}</td>
-                    <td className="py-2.5 px-4 text-slate-400 font-mono text-[11px]">{q.valid_until}</td>
-                    <td className="py-2.5 px-4 text-right font-mono text-slate-400">
-                      AED {Number(q.vat_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="py-2.5 px-4 text-right font-mono font-bold text-white">
-                      AED {Number(q.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="py-2.5 px-4 text-center">
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${
-                        q.status === 'ACCEPTED' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                        q.status === 'SENT' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-slate-800 text-slate-400'
-                      }`}>
-                        {q.status}
-                      </span>
+                {quotations.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-8 text-center text-slate-500 font-mono">
+                      No commercial quotations recorded for {activeCompany.name} yet.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  quotations.map((q) => {
+                    const cust = customers.find((c) => c.customer_id === q.customer_id);
+                    const custName = q.customer_name || cust?.name || q.customer_id || 'Client';
+                    return (
+                      <tr key={q.quotation_id} className="hover:bg-slate-800/40">
+                        <td className="py-2.5 px-4 font-mono font-bold text-indigo-400">{q.quotation_no}</td>
+                        <td className="py-2.5 px-4 font-medium text-white">{custName}</td>
+                        <td className="py-2.5 px-4 text-slate-400 font-mono text-[11px]">{q.issue_date}</td>
+                        <td className="py-2.5 px-4 text-slate-400 font-mono text-[11px]">{q.valid_until}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-slate-400">
+                          AED {Number(q.vat_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-white">
+                          AED {Number(q.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-2.5 px-4 text-center">
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${
+                            q.status === 'ACCEPTED' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                            q.status === 'SENT' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-slate-800 text-slate-400'
+                          }`}>
+                            {q.status}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -1227,30 +1414,42 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/80">
-                {purchaseInvoices.map((inv) => (
-                  <tr key={inv.purchase_invoice_id} className="hover:bg-slate-800/40">
-                    <td className="py-2.5 px-4 font-mono font-bold text-rose-300">{inv.bill_number}</td>
-                    <td className="py-2.5 px-4 font-medium text-white">{inv.supplier_id === 'supp-001' ? 'Emirates Steel Industries PJSC' : 'Middle East Fasteners LLC'}</td>
-                    <td className="py-2.5 px-4 text-slate-400 font-mono text-[11px]">{inv.bill_date}</td>
-                    <td className="py-2.5 px-4 text-slate-400 font-mono text-[11px]">{inv.due_date}</td>
-                    <td className="py-2.5 px-4 text-right font-mono text-slate-300">
-                      {Number(inv.subtotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="py-2.5 px-4 text-right font-mono text-slate-400">
-                      {Number(inv.tax_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="py-2.5 px-4 text-right font-mono font-bold text-rose-400">
-                      AED {Number(inv.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="py-2.5 px-4 text-center">
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${
-                        inv.status === 'PAID' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                      }`}>
-                        {inv.status}
-                      </span>
+                {purchaseInvoices.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-8 text-center text-slate-500 font-mono">
+                      No supplier purchase bills recorded for {activeCompany.name} yet.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  purchaseInvoices.map((inv) => {
+                    const supp = suppliers.find((s) => s.supplier_id === inv.supplier_id);
+                    const suppName = inv.supplier_name || supp?.name || inv.supplier_id || 'Vendor';
+                    return (
+                      <tr key={inv.purchase_invoice_id} className="hover:bg-slate-800/40">
+                        <td className="py-2.5 px-4 font-mono font-bold text-rose-300">{inv.bill_number}</td>
+                        <td className="py-2.5 px-4 font-medium text-white">{suppName}</td>
+                        <td className="py-2.5 px-4 text-slate-400 font-mono text-[11px]">{inv.bill_date}</td>
+                        <td className="py-2.5 px-4 text-slate-400 font-mono text-[11px]">{inv.due_date}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-slate-300">
+                          {Number(inv.subtotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono text-slate-400">
+                          {Number(inv.tax_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-rose-400">
+                          AED {Number(inv.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-2.5 px-4 text-center">
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${
+                            inv.status === 'PAID' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                          }`}>
+                            {inv.status}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -1286,33 +1485,45 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/80">
-                {salesInvoices.map((inv) => (
-                  <tr key={inv.invoice_id} className="hover:bg-slate-800/40">
-                    <td className="py-2.5 px-4 font-mono font-bold text-blue-400">{inv.invoice_number}</td>
-                    <td className="py-2.5 px-4 font-medium text-white">{inv.customer_id === 'cust-001' ? 'ADNOC Gas Processing / Emaar' : 'Al Naboodah Construction'}</td>
-                    <td className="py-2.5 px-4 text-slate-400 font-mono text-[11px]">{inv.issue_date}</td>
-                    <td className="py-2.5 px-4 text-right font-mono text-slate-300">
-                      {Number(inv.subtotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="py-2.5 px-4 text-right font-mono text-slate-400">
-                      {Number(inv.tax_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="py-2.5 px-4 text-right font-mono font-bold text-emerald-400">
-                      AED {Number(inv.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="py-2.5 px-4 text-right font-mono text-slate-300">
-                      {Number(inv.paid_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="py-2.5 px-4 text-center">
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${
-                        inv.status === 'PAID' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                        inv.status === 'PARTIALLY_PAID' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                      }`}>
-                        {inv.status}
-                      </span>
+                {salesInvoices.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-8 text-center text-slate-500 font-mono">
+                      No sales tax invoices issued for {activeCompany.name} yet.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  salesInvoices.map((inv) => {
+                    const cust = customers.find((c) => c.customer_id === inv.customer_id);
+                    const custName = inv.customer_name || cust?.name || inv.customer_id || 'Client';
+                    return (
+                      <tr key={inv.invoice_id} className="hover:bg-slate-800/40">
+                        <td className="py-2.5 px-4 font-mono font-bold text-blue-400">{inv.invoice_number}</td>
+                        <td className="py-2.5 px-4 font-medium text-white">{custName}</td>
+                        <td className="py-2.5 px-4 text-slate-400 font-mono text-[11px]">{inv.issue_date}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-slate-300">
+                          {Number(inv.subtotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono text-slate-400">
+                          {Number(inv.tax_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-emerald-400">
+                          AED {Number(inv.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono text-slate-300">
+                          {Number(inv.paid_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-2.5 px-4 text-center">
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${
+                            inv.status === 'PAID' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                            inv.status === 'PARTIALLY_PAID' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                          }`}>
+                            {inv.status}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -1385,23 +1596,36 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               </h2>
               <p className="text-xs text-slate-400">Master database of trade debtors and trade creditors with TRN and credit terms.</p>
             </div>
-            <div className="flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-lg">
-              <button
-                onClick={() => setSelectedPartyType('customers')}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition ${
-                  selectedPartyType === 'customers' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Customers / Clients ({customers.length})
-              </button>
-              <button
-                onClick={() => setSelectedPartyType('suppliers')}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition ${
-                  selectedPartyType === 'suppliers' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Suppliers / Vendors ({suppliers.length})
-              </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedPartyType === 'suppliers' && (
+                <button
+                  onClick={() => {
+                    setVoucherError(null);
+                    setIsVendorModalOpen(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold shadow-sm transition"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add Vendor / Supplier
+                </button>
+              )}
+              <div className="flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-lg">
+                <button
+                  onClick={() => setSelectedPartyType('customers')}
+                  className={`px-3 py-1 text-xs font-semibold rounded-md transition ${
+                    selectedPartyType === 'customers' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Customers / Clients ({customers.length})
+                </button>
+                <button
+                  onClick={() => setSelectedPartyType('suppliers')}
+                  className={`px-3 py-1 text-xs font-semibold rounded-md transition ${
+                    selectedPartyType === 'suppliers' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Suppliers / Vendors ({suppliers.length})
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1419,18 +1643,26 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
-                  {customers.map((c) => (
-                    <tr key={c.customer_id} className="hover:bg-slate-800/40">
-                      <td className="py-2.5 px-4 font-mono font-bold text-blue-400">{c.customer_code}</td>
-                      <td className="py-2.5 px-4 font-medium text-white">{c.name}</td>
-                      <td className="py-2.5 px-4 font-mono text-[11px] text-slate-400">{c.trn_vat_number || 'N/A'}</td>
-                      <td className="py-2.5 px-4 text-slate-300">{c.contact_person || 'Procurement Dept'}</td>
-                      <td className="py-2.5 px-4 text-slate-400">{c.email}</td>
-                      <td className="py-2.5 px-4 text-right font-mono font-bold text-white">
-                        AED {Number(c.credit_limit || 500000).toLocaleString()}
+                  {customers.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-slate-500 font-mono">
+                        No customers registered for {activeCompany.name} yet.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    customers.map((c) => (
+                      <tr key={c.customer_id} className="hover:bg-slate-800/40">
+                        <td className="py-2.5 px-4 font-mono font-bold text-blue-400">{c.customer_code}</td>
+                        <td className="py-2.5 px-4 font-medium text-white">{c.name}</td>
+                        <td className="py-2.5 px-4 font-mono text-[11px] text-slate-400">{c.trn_vat_number || 'N/A'}</td>
+                        <td className="py-2.5 px-4 text-slate-300">{c.contact_person || 'Procurement Dept'}</td>
+                        <td className="py-2.5 px-4 text-slate-400">{c.email}</td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-white">
+                          AED {Number(c.credit_limit || 0).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1448,18 +1680,26 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
-                  {suppliers.map((s) => (
-                    <tr key={s.supplier_id} className="hover:bg-slate-800/40">
-                      <td className="py-2.5 px-4 font-mono font-bold text-rose-300">{s.supplier_code}</td>
-                      <td className="py-2.5 px-4 font-medium text-white">{s.name}</td>
-                      <td className="py-2.5 px-4 font-mono text-[11px] text-slate-400">{s.trn_vat_number || 'N/A'}</td>
-                      <td className="py-2.5 px-4 text-slate-300">{s.payment_terms_days} Days Credit</td>
-                      <td className="py-2.5 px-4 text-slate-400">{s.email}</td>
-                      <td className="py-2.5 px-4 text-center">
-                        <span className="text-[10px] text-emerald-400 font-mono">ACTIVE</span>
+                  {suppliers.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-slate-500 font-mono">
+                        No suppliers or vendors registered for {activeCompany.name} yet. Click &ldquo;Add Vendor / Supplier&rdquo; to register one.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    suppliers.map((s) => (
+                      <tr key={s.supplier_id} className="hover:bg-slate-800/40">
+                        <td className="py-2.5 px-4 font-mono font-bold text-rose-300">{s.supplier_code}</td>
+                        <td className="py-2.5 px-4 font-medium text-white">{s.name}</td>
+                        <td className="py-2.5 px-4 font-mono text-[11px] text-slate-400">{s.trn_vat_number || 'N/A'}</td>
+                        <td className="py-2.5 px-4 text-slate-300">{s.payment_terms_days || 30} Days Credit</td>
+                        <td className="py-2.5 px-4 text-slate-400">{s.email || s.phone || '—'}</td>
+                        <td className="py-2.5 px-4 text-center">
+                          <span className="text-[10px] text-emerald-400 font-mono">ACTIVE</span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1503,7 +1743,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
             <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-lg">
               <div className="px-4 py-3 border-b border-slate-800 text-xs font-bold text-white uppercase tracking-wider flex items-center justify-between">
                 <span>Accounts Receivable (Debtors Aging Report)</span>
-                <span className="font-mono text-emerald-400">Total Outstanding: AED {(agingData?.ar?.totals?.total || 329850).toLocaleString()}</span>
+                <span className="font-mono text-emerald-400">Total Outstanding: AED {(agingData?.ar?.totals?.total ?? 0).toLocaleString()}</span>
               </div>
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-950/80 text-slate-400 border-b border-slate-800">
@@ -1518,26 +1758,34 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
-                  {agingData?.ar?.rows?.map((r: any) => (
-                    <tr key={r.partyId} className="hover:bg-slate-800/40">
-                      <td className="py-2.5 px-4 font-medium text-white">{r.partyName}</td>
-                      <td className="py-2.5 px-4 text-right font-mono text-slate-300">{r.current.toLocaleString()}</td>
-                      <td className="py-2.5 px-4 text-right font-mono text-slate-300">{r.d1_30.toLocaleString()}</td>
-                      <td className="py-2.5 px-4 text-right font-mono text-amber-400">{r.d31_60.toLocaleString()}</td>
-                      <td className="py-2.5 px-4 text-right font-mono text-rose-400">{r.d61_90.toLocaleString()}</td>
-                      <td className="py-2.5 px-4 text-right font-mono text-rose-500 font-bold">{r.d90Plus.toLocaleString()}</td>
-                      <td className="py-2.5 px-4 text-right font-mono font-bold text-white">AED {r.total.toLocaleString()}</td>
+                  {(!agingData?.ar?.rows || agingData.ar.rows.length === 0) ? (
+                    <tr>
+                      <td colSpan={7} className="py-6 text-center text-slate-500 font-mono">
+                        No outstanding customer receivables for {activeCompany.name}.
+                      </td>
                     </tr>
-                  ))}
+                  ) : (
+                    agingData.ar.rows.map((r: any) => (
+                      <tr key={r.partyId} className="hover:bg-slate-800/40">
+                        <td className="py-2.5 px-4 font-medium text-white">{r.partyName}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-slate-300">{r.current.toLocaleString()}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-slate-300">{r.d1_30.toLocaleString()}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-amber-400">{r.d31_60.toLocaleString()}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-rose-400">{r.d61_90.toLocaleString()}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-rose-500 font-bold">{r.d90Plus.toLocaleString()}</td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-white">AED {r.total.toLocaleString()}</td>
+                      </tr>
+                    ))
+                  )}
                   <tr className="bg-slate-950 font-bold text-white border-t-2 border-slate-700">
                     <td className="py-3 px-4">TOTALS (AED)</td>
-                    <td className="py-3 px-4 text-right font-mono">{(agingData?.ar?.totals?.current || 0).toLocaleString()}</td>
-                    <td className="py-3 px-4 text-right font-mono">{(agingData?.ar?.totals?.d1_30 || 0).toLocaleString()}</td>
-                    <td className="py-3 px-4 text-right font-mono text-amber-400">{(agingData?.ar?.totals?.d31_60 || 0).toLocaleString()}</td>
-                    <td className="py-3 px-4 text-right font-mono text-rose-400">{(agingData?.ar?.totals?.d61_90 || 0).toLocaleString()}</td>
-                    <td className="py-3 px-4 text-right font-mono text-rose-500">{(agingData?.ar?.totals?.d90Plus || 0).toLocaleString()}</td>
+                    <td className="py-3 px-4 text-right font-mono">{(agingData?.ar?.totals?.current ?? 0).toLocaleString()}</td>
+                    <td className="py-3 px-4 text-right font-mono">{(agingData?.ar?.totals?.d1_30 ?? 0).toLocaleString()}</td>
+                    <td className="py-3 px-4 text-right font-mono text-amber-400">{(agingData?.ar?.totals?.d31_60 ?? 0).toLocaleString()}</td>
+                    <td className="py-3 px-4 text-right font-mono text-rose-400">{(agingData?.ar?.totals?.d61_90 ?? 0).toLocaleString()}</td>
+                    <td className="py-3 px-4 text-right font-mono text-rose-500">{(agingData?.ar?.totals?.d90Plus ?? 0).toLocaleString()}</td>
                     <td className="py-3 px-4 text-right font-mono text-emerald-400">
-                      AED {(agingData?.ar?.totals?.total || 329850).toLocaleString()}
+                      AED {(agingData?.ar?.totals?.total ?? 0).toLocaleString()}
                     </td>
                   </tr>
                 </tbody>
@@ -1547,7 +1795,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
             <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-lg">
               <div className="px-4 py-3 border-b border-slate-800 text-xs font-bold text-white uppercase tracking-wider flex items-center justify-between">
                 <span>Accounts Payable (Creditors Aging Report)</span>
-                <span className="font-mono text-rose-400">Total Due: AED {(agingData?.ap?.totals?.total || 98700).toLocaleString()}</span>
+                <span className="font-mono text-rose-400">Total Due: AED {(agingData?.ap?.totals?.total ?? 0).toLocaleString()}</span>
               </div>
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-950/80 text-slate-400 border-b border-slate-800">
@@ -1562,26 +1810,34 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
-                  {agingData?.ap?.rows?.map((r: any) => (
-                    <tr key={r.partyId} className="hover:bg-slate-800/40">
-                      <td className="py-2.5 px-4 font-medium text-white">{r.partyName}</td>
-                      <td className="py-2.5 px-4 text-right font-mono text-slate-300">{r.current.toLocaleString()}</td>
-                      <td className="py-2.5 px-4 text-right font-mono text-slate-300">{r.d1_30.toLocaleString()}</td>
-                      <td className="py-2.5 px-4 text-right font-mono text-amber-400">{r.d31_60.toLocaleString()}</td>
-                      <td className="py-2.5 px-4 text-right font-mono text-rose-400">{r.d61_90.toLocaleString()}</td>
-                      <td className="py-2.5 px-4 text-right font-mono text-rose-500 font-bold">{r.d90Plus.toLocaleString()}</td>
-                      <td className="py-2.5 px-4 text-right font-mono font-bold text-rose-400">AED {r.total.toLocaleString()}</td>
+                  {(!agingData?.ap?.rows || agingData.ap.rows.length === 0) ? (
+                    <tr>
+                      <td colSpan={7} className="py-6 text-center text-slate-500 font-mono">
+                        No outstanding supplier payables for {activeCompany.name}.
+                      </td>
                     </tr>
-                  ))}
+                  ) : (
+                    agingData.ap.rows.map((r: any) => (
+                      <tr key={r.partyId} className="hover:bg-slate-800/40">
+                        <td className="py-2.5 px-4 font-medium text-white">{r.partyName}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-slate-300">{r.current.toLocaleString()}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-slate-300">{r.d1_30.toLocaleString()}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-amber-400">{r.d31_60.toLocaleString()}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-rose-400">{r.d61_90.toLocaleString()}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-rose-500 font-bold">{r.d90Plus.toLocaleString()}</td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-rose-400">AED {r.total.toLocaleString()}</td>
+                      </tr>
+                    ))
+                  )}
                   <tr className="bg-slate-950 font-bold text-white border-t-2 border-slate-700">
                     <td className="py-3 px-4">TOTALS (AED)</td>
-                    <td className="py-3 px-4 text-right font-mono">{(agingData?.ap?.totals?.current || 0).toLocaleString()}</td>
-                    <td className="py-3 px-4 text-right font-mono">{(agingData?.ap?.totals?.d1_30 || 0).toLocaleString()}</td>
-                    <td className="py-3 px-4 text-right font-mono text-amber-400">{(agingData?.ap?.totals?.d31_60 || 0).toLocaleString()}</td>
-                    <td className="py-3 px-4 text-right font-mono text-rose-400">{(agingData?.ap?.totals?.d61_90 || 0).toLocaleString()}</td>
-                    <td className="py-3 px-4 text-right font-mono text-rose-500">{(agingData?.ap?.totals?.d90Plus || 0).toLocaleString()}</td>
+                    <td className="py-3 px-4 text-right font-mono">{(agingData?.ap?.totals?.current ?? 0).toLocaleString()}</td>
+                    <td className="py-3 px-4 text-right font-mono">{(agingData?.ap?.totals?.d1_30 ?? 0).toLocaleString()}</td>
+                    <td className="py-3 px-4 text-right font-mono text-amber-400">{(agingData?.ap?.totals?.d31_60 ?? 0).toLocaleString()}</td>
+                    <td className="py-3 px-4 text-right font-mono text-rose-400">{(agingData?.ap?.totals?.d61_90 ?? 0).toLocaleString()}</td>
+                    <td className="py-3 px-4 text-right font-mono text-rose-500">{(agingData?.ap?.totals?.d90Plus ?? 0).toLocaleString()}</td>
                     <td className="py-3 px-4 text-right font-mono text-rose-400">
-                      AED {(agingData?.ap?.totals?.total || 98700).toLocaleString()}
+                      AED {(agingData?.ap?.totals?.total ?? 0).toLocaleString()}
                     </td>
                   </tr>
                 </tbody>
@@ -1669,6 +1925,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                         <th className="py-2 px-4 font-semibold">Voucher #</th>
                         <th className="py-2 px-4 font-semibold">Type</th>
                         <th className="py-2 px-4 font-semibold">Job Order</th>
+                        <th className="py-2 px-4 font-semibold">Vendor</th>
                         <th className="py-2 px-4 font-semibold">Line Narration / Memo</th>
                         <th className="py-2 px-4 font-semibold text-right">Debit (AED)</th>
                         <th className="py-2 px-4 font-semibold text-right">Credit (AED)</th>
@@ -1691,6 +1948,15 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                                 <span className="text-slate-600 text-[11px]">-</span>
                               )}
                             </td>
+                            <td className="py-2.5 px-4">
+                              {tx.supplierName ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                                  {tx.supplierName}
+                                </span>
+                              ) : (
+                                <span className="text-slate-600 text-[11px]">-</span>
+                              )}
+                            </td>
                             <td className="py-2.5 px-4 text-white">{tx.memo}</td>
                             <td className="py-2.5 px-4 text-right font-mono text-slate-200">
                               {tx.debit > 0 ? Number(tx.debit).toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}
@@ -1705,7 +1971,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={8} className="py-3 px-4 text-center text-slate-500 italic">
+                          <td colSpan={9} className="py-3 px-4 text-center text-slate-500 italic">
                             No posted transactions matching current filter. Opening balance: 0.00 AED.
                           </td>
                         </tr>
@@ -1828,19 +2094,19 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                     period: 'FY 2026 - Q1 Period',
                     pnl: pnlData || {
                       revenueAccounts: [],
-                      totalRevenue: 494160,
+                      totalRevenue: 0,
                       cogsAccounts: [],
-                      totalCOGS: 185300,
-                      grossProfit: 308860,
-                      grossMarginPct: 62.5,
+                      totalCOGS: 0,
+                      grossProfit: 0,
+                      grossMarginPct: 0,
                       opexAccounts: [],
-                      totalOpex: 119690,
-                      operatingProfit: 189170,
+                      totalOpex: 0,
+                      operatingProfit: 0,
                       corporateTaxThreshold: 375000,
                       corporateTaxRate: 9,
                       corporateTaxExpense: 0,
-                      netProfit: 189170,
-                      netMarginPct: 38.3,
+                      netProfit: 0,
+                      netMarginPct: 0,
                     },
                   });
                   showToast('Exported P&L Statement vector PDF successfully!');
@@ -1863,7 +2129,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                 </div>
               </div>
               <div className="text-right font-mono text-xs text-slate-400">
-                <div>Period: Q1 FY 2026</div>
+                <div>Period: FY 2026</div>
                 <div>Currency: AED</div>
                 <div className="text-emerald-400 font-semibold mt-0.5">IFRS / Accrual Standard</div>
               </div>
@@ -1876,21 +2142,23 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                 <span>AED AMOUNT</span>
               </div>
               <div className="divide-y divide-slate-800/60 mt-1">
-                <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
-                  <span>Heavy Structural Steel Fabrication Revenue (Job 0010 & 0045)</span>
-                  <span className="font-mono font-semibold">265,000.00</span>
-                </div>
-                <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
-                  <span>ASME Pressure Vessel & Piping Engineering Contract Revenue</span>
-                  <span className="font-mono font-semibold">141,290.00</span>
-                </div>
-                <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
-                  <span>MEP Installation & Site Testing Works</span>
-                  <span className="font-mono font-semibold">87,870.00</span>
-                </div>
+                {(pnlData?.revenueAccounts || []).filter((a: any) => Math.abs(Number(a.netBalance || 0)) > 0).length === 0 ? (
+                  <div className="py-2.5 px-3 text-xs text-slate-500 italic">
+                    No operating revenue postings recorded for {activeCompany.name} yet.
+                  </div>
+                ) : (
+                  (pnlData?.revenueAccounts || [])
+                    .filter((a: any) => Math.abs(Number(a.netBalance || 0)) > 0)
+                    .map((a: any) => (
+                      <div key={a.accountId} className="py-2 px-3 flex justify-between text-xs text-slate-300">
+                        <span><span className="font-mono text-slate-400 mr-2">{a.accountCode}</span>{a.accountName}</span>
+                        <span className="font-mono font-semibold">{Math.abs(Number(a.netBalance || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                    ))
+                )}
                 <div className="py-2.5 px-3 flex justify-between text-xs font-bold text-white bg-slate-800/40 rounded mt-1 border-t border-slate-700">
                   <span>TOTAL OPERATING REVENUE</span>
-                  <span className="font-mono text-emerald-400">AED {(pnlData?.totalRevenue || 494160).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  <span className="font-mono text-emerald-400">AED {(pnlData?.totalRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
             </div>
@@ -1902,25 +2170,23 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                 <span>AED AMOUNT</span>
               </div>
               <div className="divide-y divide-slate-800/60 mt-1">
-                <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
-                  <span>Direct Carbon Steel Plates, HEA Beams & Seamless Pipes</span>
-                  <span className="font-mono font-semibold">85,000.00</span>
-                </div>
-                <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
-                  <span>Direct Certified Welder & Fabricator Shop Floor Wages</span>
-                  <span className="font-mono font-semibold">65,000.00</span>
-                </div>
-                <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
-                  <span>Overhead Crane Depreciation, Machinery Fuel & Power</span>
-                  <span className="font-mono font-semibold">22,500.00</span>
-                </div>
-                <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
-                  <span>Third-Party Radiography NDT Testing & Hydrotest Pumps</span>
-                  <span className="font-mono font-semibold">12,800.00</span>
-                </div>
+                {(pnlData?.cogsAccounts || []).filter((a: any) => Math.abs(Number(a.netBalance || 0)) > 0).length === 0 ? (
+                  <div className="py-2.5 px-3 text-xs text-slate-500 italic">
+                    No direct production cost postings recorded for {activeCompany.name} yet.
+                  </div>
+                ) : (
+                  (pnlData?.cogsAccounts || [])
+                    .filter((a: any) => Math.abs(Number(a.netBalance || 0)) > 0)
+                    .map((a: any) => (
+                      <div key={a.accountId} className="py-2 px-3 flex justify-between text-xs text-slate-300">
+                        <span><span className="font-mono text-slate-400 mr-2">{a.accountCode}</span>{a.accountName}</span>
+                        <span className="font-mono font-semibold">{Math.abs(Number(a.netBalance || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                    ))
+                )}
                 <div className="py-2.5 px-3 flex justify-between text-xs font-bold text-white bg-slate-800/40 rounded mt-1 border-t border-slate-700">
                   <span>TOTAL DIRECT JOB PRODUCTION COSTS</span>
-                  <span className="font-mono text-rose-300">AED {(pnlData?.totalCOGS || 185300).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  <span className="font-mono text-rose-300">AED {(pnlData?.totalCOGS ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
             </div>
@@ -1929,10 +2195,10 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
             <div className="p-3.5 rounded-xl bg-blue-950/40 border border-blue-500/40 flex items-center justify-between">
               <div>
                 <span className="text-xs font-bold text-blue-200">GROSS PROFIT MARGIN</span>
-                <span className="text-xs text-blue-400 font-mono ml-2">({pnlData?.grossMarginPct || 62.5}%)</span>
+                <span className="text-xs text-blue-400 font-mono ml-2">({pnlData?.grossMarginPct ?? 0}%)</span>
               </div>
               <div className="text-base font-bold text-white font-mono">
-                AED {(pnlData?.grossProfit || 308860).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                AED {(pnlData?.grossProfit ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>
 
@@ -1943,29 +2209,23 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                 <span>AED AMOUNT</span>
               </div>
               <div className="divide-y divide-slate-800/60 mt-1">
-                <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
-                  <span>Executive & Administration Office Salaries</span>
-                  <span className="font-mono font-semibold">55,000.00</span>
-                </div>
-                <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
-                  <span>Fabrication Yard Land Lease & Industrial Municipality Fees</span>
-                  <span className="font-mono font-semibold">28,000.00</span>
-                </div>
-                <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
-                  <span>DEWA Factory Electricity, Water & Industrial Diesel Utilities</span>
-                  <span className="font-mono font-semibold">15,540.00</span>
-                </div>
-                <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
-                  <span>Workmen Compensation & Corporate Group Medical Insurance</span>
-                  <span className="font-mono font-semibold">12,400.00</span>
-                </div>
-                <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
-                  <span>Fleet Vehicle Maintenance, Diesel Fuel & Salik Tolls</span>
-                  <span className="font-mono font-semibold">8,750.00</span>
-                </div>
+                {(pnlData?.opexAccounts || []).filter((a: any) => Math.abs(Number(a.netBalance || 0)) > 0).length === 0 ? (
+                  <div className="py-2.5 px-3 text-xs text-slate-500 italic">
+                    No operating expense postings recorded for {activeCompany.name} yet.
+                  </div>
+                ) : (
+                  (pnlData?.opexAccounts || [])
+                    .filter((a: any) => Math.abs(Number(a.netBalance || 0)) > 0)
+                    .map((a: any) => (
+                      <div key={a.accountId} className="py-2 px-3 flex justify-between text-xs text-slate-300">
+                        <span><span className="font-mono text-slate-400 mr-2">{a.accountCode}</span>{a.accountName}</span>
+                        <span className="font-mono font-semibold">{Math.abs(Number(a.netBalance || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                    ))
+                )}
                 <div className="py-2.5 px-3 flex justify-between text-xs font-bold text-white bg-slate-800/40 rounded mt-1 border-t border-slate-700">
                   <span>TOTAL OPERATING EXPENSES</span>
-                  <span className="font-mono text-rose-300">AED {(pnlData?.totalOpex || 119690).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  <span className="font-mono text-rose-300">AED {(pnlData?.totalOpex ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
             </div>
@@ -1973,23 +2233,26 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
             {/* Operating Profit */}
             <div className="py-2.5 px-3 flex justify-between text-xs font-bold text-white bg-slate-800/60 rounded border-t border-slate-700">
               <span>OPERATING PROFIT BEFORE CORPORATE TAX (EBIT)</span>
-              <span className="font-mono">AED {(pnlData?.operatingProfit || 189170).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              <span className="font-mono">AED {(pnlData?.operatingProfit ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
 
             {/* Corporate Tax (9%) */}
             <div className="py-2 px-3 flex justify-between text-xs text-slate-400">
               <span>UAE Federal Corporate Tax (9% on profit above AED 375,000 threshold)</span>
-              <span className="font-mono">AED {(pnlData?.corporateTaxExpense || 0).toFixed(2)} (Exempt under threshold)</span>
+              <span className="font-mono">
+                AED {(pnlData?.corporateTaxExpense ?? 0).toFixed(2)}{' '}
+                {(pnlData?.corporateTaxExpense ?? 0) === 0 ? '(Exempt under threshold)' : ''}
+              </span>
             </div>
 
             {/* Net Profit Callout */}
             <div className="p-4 rounded-xl bg-emerald-950/50 border border-emerald-500/50 flex items-center justify-between">
               <div>
                 <span className="text-sm font-bold text-emerald-200">NET PROFIT FOR THE PERIOD</span>
-                <span className="text-xs text-emerald-400 font-mono ml-2">(Net Margin: {pnlData?.netMarginPct || 38.3}%)</span>
+                <span className="text-xs text-emerald-400 font-mono ml-2">(Net Margin: {pnlData?.netMarginPct ?? 0}%)</span>
               </div>
               <div className="text-lg font-bold text-emerald-300 font-mono">
-                AED {(pnlData?.netProfit || 189170).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                AED {(pnlData?.netProfit ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>
 
@@ -2048,20 +2311,20 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                     asOfDate: new Date().toLocaleDateString('en-GB'),
                     balanceSheet: balanceSheetData || {
                       currentAssets: [],
-                      totalCurrentAssets: 1498664.5,
+                      totalCurrentAssets: 0,
                       nonCurrentAssets: [],
-                      totalNonCurrentAssets: 965000.0,
-                      totalAssets: 2463664.5,
+                      totalNonCurrentAssets: 0,
+                      totalAssets: 0,
                       currentLiabilities: [],
-                      totalCurrentLiabilities: 310324.5,
+                      totalCurrentLiabilities: 0,
                       longTermLiabilities: [],
-                      totalLongTermLiabilities: 263000.0,
-                      totalLiabilities: 573324.5,
+                      totalLongTermLiabilities: 0,
+                      totalLiabilities: 0,
                       baseEquity: [],
-                      totalBaseEquity: 1701170.0,
-                      currentPeriodProfit: 189170.0,
-                      totalEquity: 1890340.0,
-                      totalLiabilitiesAndEquity: 2463664.5,
+                      totalBaseEquity: 0,
+                      currentPeriodProfit: 0,
+                      totalEquity: 0,
+                      totalLiabilitiesAndEquity: 0,
                       isBalanced: true,
                       variance: 0,
                     },
@@ -2088,7 +2351,9 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               <div className="text-right font-mono text-xs text-slate-400">
                 <div>As of: {new Date().toLocaleDateString('en-GB')}</div>
                 <div>Currency: AED</div>
-                <div className="text-emerald-400 font-semibold mt-0.5">100% Balanced Equation</div>
+                <div className="text-emerald-400 font-semibold mt-0.5">
+                  {balanceSheetData?.isBalanced ?? true ? '100% Balanced Equation' : 'Check Variance'}
+                </div>
               </div>
             </div>
 
@@ -2103,33 +2368,21 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               <div className="pl-2">
                 <div className="text-xs font-bold text-slate-200 uppercase tracking-wide">A. Current Assets</div>
                 <div className="divide-y divide-slate-800/60 mt-1">
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Cash and Cash Equivalents (Emirates NBD Operating Account)</span>
-                    <span className="font-mono font-semibold">943,564.50</span>
-                  </div>
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Petty Cash Float - Al Quoz Central Fabrication Yard Vault</span>
-                    <span className="font-mono font-semibold">12,500.00</span>
-                  </div>
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Accounts Receivable (Trade Debtors - Emaar, ADNOC, Petrofac)</span>
-                    <span className="font-mono font-semibold">329,850.00</span>
-                  </div>
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Post-Dated Cheques in Safe (Receivable Cheques)</span>
-                    <span className="font-mono font-semibold">145,000.00</span>
-                  </div>
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Raw Material Inventory & Structural Steel Profiles</span>
-                    <span className="font-mono font-semibold">42,750.00</span>
-                  </div>
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Advances & Security Deposits to Material Suppliers</span>
-                    <span className="font-mono font-semibold">25,000.00</span>
-                  </div>
+                  {(balanceSheetData?.currentAssets || []).filter((a: any) => Math.abs(Number(a.netBalance || 0)) > 0).length === 0 ? (
+                    <div className="py-2 px-3 text-xs text-slate-500 italic">No current asset balances recorded yet.</div>
+                  ) : (
+                    (balanceSheetData?.currentAssets || [])
+                      .filter((a: any) => Math.abs(Number(a.netBalance || 0)) > 0)
+                      .map((a: any) => (
+                        <div key={a.accountId} className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
+                          <span><span className="font-mono text-slate-400 mr-2">{a.accountCode}</span>{a.accountName}</span>
+                          <span className="font-mono font-semibold">{Number(a.netBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                      ))
+                  )}
                   <div className="py-2 px-3 flex justify-between text-xs font-bold text-white bg-slate-800/40 rounded mt-1">
                     <span>TOTAL CURRENT ASSETS</span>
-                    <span className="font-mono text-blue-400">AED 1,498,664.50</span>
+                    <span className="font-mono text-blue-400">AED {(balanceSheetData?.totalCurrentAssets ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
                 </div>
               </div>
@@ -2138,29 +2391,23 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               <div className="pl-2">
                 <div className="text-xs font-bold text-slate-200 uppercase tracking-wide">B. Non-Current (Property, Plant & Equipment)</div>
                 <div className="divide-y divide-slate-800/60 mt-1">
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Workshop Land & Yard Buildings Infrastructure</span>
-                    <span className="font-mono font-semibold">450,000.00</span>
-                  </div>
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Heavy Overhead Gantry Cranes & Mobile Rigging Units</span>
-                    <span className="font-mono font-semibold">280,000.00</span>
-                  </div>
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>CNC Plasma Cutting, Bending & SA Welding Machinery</span>
-                    <span className="font-mono font-semibold">190,000.00</span>
-                  </div>
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Commercial Transport Fleet Trucks & Flatbed Trailers</span>
-                    <span className="font-mono font-semibold">140,000.00</span>
-                  </div>
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Less: Accumulated Depreciation</span>
-                    <span className="font-mono font-semibold text-rose-400">-95,000.00</span>
-                  </div>
+                  {(balanceSheetData?.nonCurrentAssets || []).filter((a: any) => Math.abs(Number(a.netBalance || 0)) > 0).length === 0 ? (
+                    <div className="py-2 px-3 text-xs text-slate-500 italic">No non-current asset balances recorded yet.</div>
+                  ) : (
+                    (balanceSheetData?.nonCurrentAssets || [])
+                      .filter((a: any) => Math.abs(Number(a.netBalance || 0)) > 0)
+                      .map((a: any) => (
+                        <div key={a.accountId} className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
+                          <span><span className="font-mono text-slate-400 mr-2">{a.accountCode}</span>{a.accountName}</span>
+                          <span className={`font-mono font-semibold ${Number(a.netBalance || 0) < 0 ? 'text-rose-400' : ''}`}>
+                            {Number(a.netBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      ))
+                  )}
                   <div className="py-2 px-3 flex justify-between text-xs font-bold text-white bg-slate-800/40 rounded mt-1">
                     <span>TOTAL NON-CURRENT ASSETS</span>
-                    <span className="font-mono text-blue-400">AED 965,000.00</span>
+                    <span className="font-mono text-blue-400">AED {(balanceSheetData?.totalNonCurrentAssets ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
                 </div>
               </div>
@@ -2168,7 +2415,7 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               {/* TOTAL ASSETS CALLOUT */}
               <div className="p-3.5 rounded-xl bg-blue-950/50 border border-blue-500/50 flex items-center justify-between">
                 <span className="text-sm font-bold text-white">TOTAL ASSETS</span>
-                <span className="text-lg font-bold text-blue-300 font-mono">AED 2,463,664.50</span>
+                <span className="text-lg font-bold text-blue-300 font-mono">AED {(balanceSheetData?.totalAssets ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
             </div>
 
@@ -2183,29 +2430,21 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               <div className="pl-2">
                 <div className="text-xs font-bold text-slate-200 uppercase tracking-wide">A. Current Liabilities</div>
                 <div className="divide-y divide-slate-800/60 mt-1">
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Accounts Payable (Trade Creditors - Emirates Steel, Fasteners)</span>
-                    <span className="font-mono font-semibold">108,700.00</span>
-                  </div>
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>VAT Payable (UAE FTA 5% Tax Collection)</span>
-                    <span className="font-mono font-semibold">21,124.50</span>
-                  </div>
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Post-Dated Cheques Issued (Payable Cheques)</span>
-                    <span className="font-mono font-semibold">87,500.00</span>
-                  </div>
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Accrued Workshop Wages & Utilities Payable</span>
-                    <span className="font-mono font-semibold">48,000.00</span>
-                  </div>
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Customer Mobilization Deposits & Advances</span>
-                    <span className="font-mono font-semibold">45,000.00</span>
-                  </div>
+                  {(balanceSheetData?.currentLiabilities || []).filter((a: any) => Math.abs(Number(a.netBalance || 0)) > 0).length === 0 ? (
+                    <div className="py-2 px-3 text-xs text-slate-500 italic">No current liability balances recorded yet.</div>
+                  ) : (
+                    (balanceSheetData?.currentLiabilities || [])
+                      .filter((a: any) => Math.abs(Number(a.netBalance || 0)) > 0)
+                      .map((a: any) => (
+                        <div key={a.accountId} className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
+                          <span><span className="font-mono text-slate-400 mr-2">{a.accountCode}</span>{a.accountName}</span>
+                          <span className="font-mono font-semibold">{Math.abs(Number(a.netBalance || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                      ))
+                  )}
                   <div className="py-2 px-3 flex justify-between text-xs font-bold text-white bg-slate-800/40 rounded mt-1">
                     <span>TOTAL CURRENT LIABILITIES</span>
-                    <span className="font-mono text-rose-400">AED 310,324.50</span>
+                    <span className="font-mono text-rose-400">AED {(balanceSheetData?.totalCurrentLiabilities ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
                 </div>
               </div>
@@ -2214,24 +2453,28 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               <div className="pl-2">
                 <div className="text-xs font-bold text-slate-200 uppercase tracking-wide">B. Long-Term Liabilities</div>
                 <div className="divide-y divide-slate-800/60 mt-1">
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Bank Term Facility (Heavy Machinery Equipment Financing)</span>
-                    <span className="font-mono font-semibold">185,000.00</span>
-                  </div>
-                  <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                    <span>Provision for End of Service Gratuity Indemnity (EOSB)</span>
-                    <span className="font-mono font-semibold">78,000.00</span>
-                  </div>
+                  {(balanceSheetData?.longTermLiabilities || []).filter((a: any) => Math.abs(Number(a.netBalance || 0)) > 0).length === 0 ? (
+                    <div className="py-2 px-3 text-xs text-slate-500 italic">No long-term liability balances recorded yet.</div>
+                  ) : (
+                    (balanceSheetData?.longTermLiabilities || [])
+                      .filter((a: any) => Math.abs(Number(a.netBalance || 0)) > 0)
+                      .map((a: any) => (
+                        <div key={a.accountId} className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
+                          <span><span className="font-mono text-slate-400 mr-2">{a.accountCode}</span>{a.accountName}</span>
+                          <span className="font-mono font-semibold">{Math.abs(Number(a.netBalance || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                      ))
+                  )}
                   <div className="py-2 px-3 flex justify-between text-xs font-bold text-white bg-slate-800/40 rounded mt-1">
                     <span>TOTAL LONG-TERM LIABILITIES</span>
-                    <span className="font-mono text-rose-400">AED 263,000.00</span>
+                    <span className="font-mono text-rose-400">AED {(balanceSheetData?.totalLongTermLiabilities ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
                 </div>
               </div>
 
               <div className="py-2.5 px-3 flex justify-between text-xs font-bold text-white bg-slate-800/60 rounded border-t border-slate-700">
                 <span>TOTAL LIABILITIES</span>
-                <span className="font-mono text-rose-400">AED 573,324.50</span>
+                <span className="font-mono text-rose-400">AED {(balanceSheetData?.totalLiabilities ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
             </div>
 
@@ -2242,25 +2485,21 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                 <span>AED AMOUNT</span>
               </div>
               <div className="divide-y divide-slate-800/60 mt-1 pl-2">
-                <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                  <span>Paid-Up Share Capital (1,000 shares @ AED 1,000 per share)</span>
-                  <span className="font-mono font-semibold">1,000,000.00</span>
-                </div>
-                <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                  <span>Statutory Legal Reserve</span>
-                  <span className="font-mono font-semibold">150,000.00</span>
-                </div>
-                <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
-                  <span>Retained Earnings from Prior Accounting Periods</span>
-                  <span className="font-mono font-semibold">551,170.00</span>
-                </div>
+                {(balanceSheetData?.baseEquity || [])
+                  .filter((a: any) => Math.abs(Number(a.netBalance || 0)) > 0)
+                  .map((a: any) => (
+                    <div key={a.accountId} className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
+                      <span><span className="font-mono text-slate-400 mr-2">{a.accountCode}</span>{a.accountName}</span>
+                      <span className="font-mono font-semibold">{Math.abs(Number(a.netBalance || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  ))}
                 <div className="py-1.5 px-3 flex justify-between text-xs text-slate-300">
                   <span>Current Period Net Profit (Transferred from P&L)</span>
-                  <span className="font-mono font-semibold text-emerald-400">189,170.00</span>
+                  <span className="font-mono font-semibold text-emerald-400">{(balanceSheetData?.currentPeriodProfit ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="py-2 px-3 flex justify-between text-xs font-bold text-white bg-slate-800/40 rounded mt-1">
                   <span>TOTAL SHAREHOLDERS EQUITY</span>
-                  <span className="font-mono text-purple-400">AED 1,890,340.00</span>
+                  <span className="font-mono text-purple-400">AED {(balanceSheetData?.totalEquity ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
             </div>
@@ -2269,9 +2508,11 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
             <div className="p-4 rounded-xl bg-emerald-950/50 border border-emerald-500/50 flex items-center justify-between">
               <div>
                 <span className="text-sm font-bold text-white">TOTAL LIABILITIES & EQUITY</span>
-                <span className="text-xs text-emerald-400 font-mono ml-2">(Assets - Liab&Eq Variance: 0.00 AED · Balanced)</span>
+                <span className="text-xs text-emerald-400 font-mono ml-2">
+                  (Variance: {Number(balanceSheetData?.variance ?? 0).toFixed(2)} AED · {balanceSheetData?.isBalanced ?? true ? 'Balanced' : 'Unbalanced'})
+                </span>
               </div>
-              <div className="text-lg font-bold text-emerald-300 font-mono">AED 2,463,664.50</div>
+              <div className="text-lg font-bold text-emerald-300 font-mono">AED {(balanceSheetData?.totalLiabilitiesAndEquity ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
             </div>
 
             {/* Signatures */}
@@ -2325,15 +2566,17 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               <div className="divide-y divide-slate-800/60 mt-1 pl-2">
                 <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
                   <span>Cash Inflows: Customer invoice collections and progress receipts</span>
-                  <span className="font-mono font-semibold text-emerald-400">+298,354.50</span>
+                  <span className="font-mono font-semibold text-emerald-400">+{(cashFlowData?.operating?.customerReceipts ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
                   <span>Cash Outflows: Supplier payments, workshop wages & factory utilities</span>
-                  <span className="font-mono font-semibold text-rose-400">-124,110.00</span>
+                  <span className="font-mono font-semibold text-rose-400">-{(cashFlowData?.operating?.supplierAndOpexPayments ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="py-2.5 px-3 flex justify-between text-xs font-bold text-white bg-slate-800/40 rounded mt-1">
                   <span>NET CASH GENERATED FROM OPERATING ACTIVITIES</span>
-                  <span className="font-mono text-emerald-400">AED +174,244.50</span>
+                  <span className={`font-mono ${(cashFlowData?.operating?.netOperating ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    AED {(cashFlowData?.operating?.netOperating ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
                 </div>
               </div>
             </div>
@@ -2345,12 +2588,12 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               </div>
               <div className="divide-y divide-slate-800/60 mt-1 pl-2">
                 <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
-                  <span>Purchase of CNC Plasma Machine & Hydraulic Overhaul Spares</span>
-                  <span className="font-mono font-semibold text-rose-400">-75,000.00</span>
+                  <span>Capital Expenditure & Property, Plant & Equipment Acquisitions</span>
+                  <span className="font-mono font-semibold text-rose-400">-{(cashFlowData?.investing?.capitalExpenditure ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="py-2.5 px-3 flex justify-between text-xs font-bold text-white bg-slate-800/40 rounded mt-1">
                   <span>NET CASH USED IN INVESTING ACTIVITIES</span>
-                  <span className="font-mono text-rose-400">AED -75,000.00</span>
+                  <span className="font-mono text-rose-400">AED {(cashFlowData?.investing?.netInvesting ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
             </div>
@@ -2362,24 +2605,26 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               </div>
               <div className="divide-y divide-slate-800/60 mt-1 pl-2">
                 <div className="py-2 px-3 flex justify-between text-xs text-slate-300">
-                  <span>Capital Contributed by Shareholders / Debt Service Net</span>
-                  <span className="font-mono font-semibold">0.00</span>
+                  <span>Capital Contributed by Shareholders / Debt Proceeds Net</span>
+                  <span className="font-mono font-semibold">{((cashFlowData?.financing?.capitalInjections ?? 0) - (cashFlowData?.financing?.debtRepayments ?? 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="py-2.5 px-3 flex justify-between text-xs font-bold text-white bg-slate-800/40 rounded mt-1">
                   <span>NET CASH FROM FINANCING ACTIVITIES</span>
-                  <span className="font-mono text-slate-400">AED 0.00</span>
+                  <span className="font-mono text-slate-300">AED {(cashFlowData?.financing?.netFinancing ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
             </div>
 
             <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
               <div>
-                <div className="text-xs font-bold text-white">NET INCREASE IN CASH AND CASH EQUIVALENTS</div>
-                <div className="text-[11px] text-slate-400 mt-0.5">Beginning Cash: AED 1,000,000.00</div>
+                <div className="text-xs font-bold text-white">NET INCREASE / (DECREASE) IN CASH AND CASH EQUIVALENTS</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">Beginning Cash: AED {(cashFlowData?.beginningCash ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
               </div>
               <div className="text-right">
-                <div className="text-base font-bold text-emerald-400 font-mono">+99,244.50 AED</div>
-                <div className="text-xs text-slate-300 font-mono mt-0.5 font-bold">Ending Cash: AED 1,099,244.50</div>
+                <div className={`text-base font-bold font-mono ${(cashFlowData?.netCashChange ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {(cashFlowData?.netCashChange ?? 0) >= 0 ? '+' : ''}{(cashFlowData?.netCashChange ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} AED
+                </div>
+                <div className="text-xs text-slate-300 font-mono mt-0.5 font-bold">Ending Cash: AED {(cashFlowData?.endingCash ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
               </div>
             </div>
           </div>
@@ -2413,19 +2658,19 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                     asOfDate: new Date().toLocaleDateString('en-GB'),
                     metrics: financialMetrics || {
                       ratios: {
-                        currentRatio: 4.83,
-                        quickRatio: 4.69,
-                        debtToEquity: 0.3,
-                        grossMarginPct: 62.5,
-                        netMarginPct: 38.3,
-                        returnOnEquity: 10.0,
+                        currentRatio: 0,
+                        quickRatio: 0,
+                        debtToEquity: 0,
+                        grossMarginPct: 0,
+                        netMarginPct: 0,
+                        returnOnEquity: 0,
                       },
                       vatReturn: {
-                        standardRatedSupplies: 598290,
-                        outputVatCollected: 29914.5,
-                        standardRatedPurchases: 197400,
-                        inputVatRecoverable: 9870.0,
-                        netVatPayable: 20044.5,
+                        standardRatedSupplies: 0,
+                        outputVatCollected: 0,
+                        standardRatedPurchases: 0,
+                        inputVatRecoverable: 0,
+                        netVatPayable: 0,
                         status: 'PAYABLE',
                       },
                       pnlSummary: pnlData,
@@ -2465,32 +2710,32 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
                   <div className="text-[10px] text-slate-400 uppercase tracking-wider">Current Ratio (Liquidity)</div>
-                  <div className="text-xl font-bold text-white font-mono mt-1">{financialMetrics?.ratios?.currentRatio || 4.83}x</div>
-                  <div className="text-[10px] text-emerald-400 mt-0.5">Benchmark: &gt;1.5x (Exceptional solvency buffer)</div>
+                  <div className="text-xl font-bold text-white font-mono mt-1">{financialMetrics?.ratios?.currentRatio ?? 0}x</div>
+                  <div className="text-[10px] text-emerald-400 mt-0.5">Benchmark: &gt;1.5x</div>
                 </div>
                 <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
                   <div className="text-[10px] text-slate-400 uppercase tracking-wider">Quick Ratio (Acid-Test)</div>
-                  <div className="text-xl font-bold text-white font-mono mt-1">{financialMetrics?.ratios?.quickRatio || 4.69}x</div>
+                  <div className="text-xl font-bold text-white font-mono mt-1">{financialMetrics?.ratios?.quickRatio ?? 0}x</div>
                   <div className="text-[10px] text-emerald-400 mt-0.5">Excludes raw inventory · Immediate cash coverage</div>
                 </div>
                 <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
                   <div className="text-[10px] text-slate-400 uppercase tracking-wider">Debt-to-Equity Ratio</div>
-                  <div className="text-xl font-bold text-white font-mono mt-1">{financialMetrics?.ratios?.debtToEquity || 0.3}x</div>
-                  <div className="text-[10px] text-emerald-400 mt-0.5">Conservative low leverage · High solvency security</div>
+                  <div className="text-xl font-bold text-white font-mono mt-1">{financialMetrics?.ratios?.debtToEquity ?? 0}x</div>
+                  <div className="text-[10px] text-emerald-400 mt-0.5">Target &lt;0.5x (Low leverage)</div>
                 </div>
                 <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
                   <div className="text-[10px] text-slate-400 uppercase tracking-wider">Gross Profit Margin</div>
-                  <div className="text-xl font-bold text-white font-mono mt-1">{financialMetrics?.ratios?.grossMarginPct || 62.5}%</div>
-                  <div className="text-[10px] text-indigo-400 mt-0.5">Above UAE structural engineering industry average</div>
+                  <div className="text-xl font-bold text-white font-mono mt-1">{financialMetrics?.ratios?.grossMarginPct ?? 0}%</div>
+                  <div className="text-[10px] text-indigo-400 mt-0.5">Direct cost profitability</div>
                 </div>
                 <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
                   <div className="text-[10px] text-slate-400 uppercase tracking-wider">Net Profit Margin</div>
-                  <div className="text-xl font-bold text-white font-mono mt-1">{financialMetrics?.ratios?.netMarginPct || 38.3}%</div>
-                  <div className="text-[10px] text-indigo-400 mt-0.5">Net profit after all factory overheads and depreciation</div>
+                  <div className="text-xl font-bold text-white font-mono mt-1">{financialMetrics?.ratios?.netMarginPct ?? 0}%</div>
+                  <div className="text-[10px] text-indigo-400 mt-0.5">Net profit after overheads & depreciation</div>
                 </div>
                 <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
                   <div className="text-[10px] text-slate-400 uppercase tracking-wider">Return on Equity (ROE)</div>
-                  <div className="text-xl font-bold text-white font-mono mt-1">{financialMetrics?.ratios?.returnOnEquity || 10.0}%</div>
+                  <div className="text-xl font-bold text-white font-mono mt-1">{financialMetrics?.ratios?.returnOnEquity ?? 0}%</div>
                   <div className="text-[10px] text-purple-400 mt-0.5">Annualized yield on paid-in capital and reserves</div>
                 </div>
               </div>
@@ -2515,24 +2760,24 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                   <tbody className="divide-y divide-slate-800">
                     <tr>
                       <td className="py-2.5 px-4 font-mono font-bold text-white">Box 1</td>
-                      <td className="py-2.5 px-4 text-slate-300">Standard Rated Supplies (Dubai & Northern Emirates Sales)</td>
-                      <td className="py-2.5 px-4 text-right font-mono">598,290.00</td>
+                      <td className="py-2.5 px-4 text-slate-300">Standard Rated Supplies (UAE Tax Invoices Issued)</td>
+                      <td className="py-2.5 px-4 text-right font-mono">{(financialMetrics?.vatReturn?.standardRatedSupplies ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="py-2.5 px-4 text-right font-mono text-indigo-400">5.0%</td>
-                      <td className="py-2.5 px-4 text-right font-mono text-emerald-400 font-bold">29,914.50</td>
+                      <td className="py-2.5 px-4 text-right font-mono text-emerald-400 font-bold">{(financialMetrics?.vatReturn?.outputVatCollected ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     </tr>
                     <tr>
                       <td className="py-2.5 px-4 font-mono font-bold text-white">Box 9</td>
                       <td className="py-2.5 px-4 text-slate-300">Standard Rated Expenses & Capital Purchases (Input Tax Recoverable)</td>
-                      <td className="py-2.5 px-4 text-right font-mono">197,400.00</td>
+                      <td className="py-2.5 px-4 text-right font-mono">{(financialMetrics?.vatReturn?.standardRatedPurchases ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="py-2.5 px-4 text-right font-mono text-indigo-400">5.0%</td>
-                      <td className="py-2.5 px-4 text-right font-mono text-rose-400 font-bold">9,870.00</td>
+                      <td className="py-2.5 px-4 text-right font-mono text-rose-400 font-bold">{(financialMetrics?.vatReturn?.inputVatRecoverable ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     </tr>
                     <tr className="bg-slate-950 font-bold text-white border-t border-slate-700">
                       <td colSpan={4} className="py-3 px-4">
                         NET VAT PAYABLE TO FEDERAL TAX AUTHORITY (BOX 1 OUTPUT - BOX 9 INPUT)
                       </td>
                       <td className="py-3 px-4 text-right font-mono text-amber-400 text-sm">
-                        AED 20,044.50
+                        AED {(financialMetrics?.vatReturn?.netVatPayable ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                     </tr>
                   </tbody>
@@ -2770,6 +3015,160 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                         ))}
                       </select>
                     )}
+                  </div>
+                )}
+              </div>
+
+              {/* Vendor / Supplier Assignment (Optional) */}
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Truck className="h-3.5 w-3.5 text-amber-400" />
+                      Vendor / Supplier (Optional)
+                    </span>
+                    <p className="text-[11px] text-slate-400">
+                      Attach an existing vendor to this entry or add a new vendor directly without leaving this voucher.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVoucherError(null);
+                      setIsAddingVendorInline((prev) => !prev);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition shrink-0 ${
+                      isAddingVendorInline
+                        ? 'bg-slate-800 text-slate-300 border border-slate-700'
+                        : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30'
+                    }`}
+                  >
+                    {isAddingVendorInline ? (
+                      <>
+                        <X className="h-3 w-3" /> Close New Vendor
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="h-3 w-3" /> Add Vendor
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <select
+                  value={selectedSupplierId}
+                  onChange={(e) => setSelectedSupplierId(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-1 focus:ring-amber-500 font-medium"
+                >
+                  <option value="">No Vendor / General Journal</option>
+                  {suppliers.map((sup) => (
+                    <option key={sup.supplier_id} value={sup.supplier_id}>
+                      {sup.name}
+                      {sup.supplier_code ? ` (${sup.supplier_code})` : ''}
+                      {sup.trn_vat_number ? ` · TRN: ${sup.trn_vat_number}` : ''}
+                    </option>
+                  ))}
+                </select>
+
+                {isAddingVendorInline && (
+                  <div className="p-3 rounded-lg bg-slate-900 border border-amber-500/30 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider">
+                        Quick-Create & Select Vendor
+                      </span>
+                      <span className="text-[10px] text-slate-400">Saves immediately to Google Sheets</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="sm:col-span-2">
+                        <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                          Vendor / Supplier Company Name *
+                        </label>
+                        <input
+                          type="text"
+                          value={newVendorName}
+                          onChange={(e) => setNewVendorName(e.target.value)}
+                          placeholder="e.g. Emirates Structural Steel LLC"
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs focus:ring-1 focus:ring-amber-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                          UAE TRN / VAT Number
+                        </label>
+                        <input
+                          type="text"
+                          value={newVendorTrn}
+                          onChange={(e) => setNewVendorTrn(e.target.value)}
+                          placeholder="e.g. 100452910000003"
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                          Payment Terms (Days)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={newVendorTerms}
+                          onChange={(e) => setNewVendorTerms(Number(e.target.value) || 0)}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                          Email (Optional)
+                        </label>
+                        <input
+                          type="email"
+                          value={newVendorEmail}
+                          onChange={(e) => setNewVendorEmail(e.target.value)}
+                          placeholder="accounts@vendor.ae"
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                          Phone (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={newVendorPhone}
+                          onChange={(e) => setNewVendorPhone(e.target.value)}
+                          placeholder="+971 50 000 0000"
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {voucherError && (
+                      <div className="text-[11px] text-rose-400 bg-rose-500/10 p-2 rounded border border-rose-500/20">
+                        {voucherError}
+                      </div>
+                    )}
+
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAddingVendorInline(false);
+                          setVoucherError(null);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 text-[11px]"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={creatingVendor}
+                        onClick={() => handleCreateVendor()}
+                        className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-semibold flex items-center gap-1"
+                      >
+                        <Check className="h-3 w-3" />
+                        {creatingVendor ? 'Saving...' : 'Save & Select Vendor'}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -3101,11 +3500,16 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl p-6 shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div>
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <h3 className="text-base font-bold text-white flex flex-wrap items-center gap-2">
                   <Receipt className="h-4 w-4 text-indigo-400" /> Voucher #{viewingVoucher.entry_number}
                   {viewingVoucher.job_number && (
                     <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded font-mono bg-blue-500/15 text-blue-300 border border-blue-500/30">
                       <Briefcase className="h-2.5 w-2.5" /> Job #{viewingVoucher.job_number}
+                    </span>
+                  )}
+                  {viewingVoucher.supplier_name && (
+                    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded font-medium bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                      <Truck className="h-2.5 w-2.5" /> {viewingVoucher.supplier_name}
                     </span>
                   )}
                 </h3>
@@ -3168,6 +3572,117 @@ export function FinanceModule({ activeCompany, tenantName, userRole, jobs }: Fin
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL 4: ADD VENDOR / SUPPLIER */}
+      {/* ============================================================== */}
+      {isVendorModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Truck className="h-4 w-4 text-amber-400" />
+                Add Vendor / Supplier ({activeCompany.code})
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsVendorModalOpen(false);
+                  setVoucherError(null);
+                }}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleCreateVendor} className="space-y-3 mt-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  Vendor / Supplier Company Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Gulf Metal & Alloys Trading LLC"
+                  value={newVendorName}
+                  onChange={(e) => setNewVendorName(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">UAE TRN / VAT Number</label>
+                  <input
+                    type="text"
+                    placeholder="100xxxxxxxxxxx3"
+                    value={newVendorTrn}
+                    onChange={(e) => setNewVendorTrn(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">Payment Terms (Days)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={newVendorTerms}
+                    onChange={(e) => setNewVendorTerms(Number(e.target.value) || 0)}
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs font-mono"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">Email</label>
+                  <input
+                    type="email"
+                    placeholder="accounts@supplier.ae"
+                    value={newVendorEmail}
+                    onChange={(e) => setNewVendorEmail(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">Phone</label>
+                  <input
+                    type="text"
+                    placeholder="+971 4 000 0000"
+                    value={newVendorPhone}
+                    onChange={(e) => setNewVendorPhone(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs"
+                  />
+                </div>
+              </div>
+
+              {voucherError && (
+                <div className="text-xs text-rose-400 bg-rose-500/10 p-2.5 rounded border border-rose-500/20">
+                  {voucherError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsVendorModalOpen(false);
+                    setVoucherError(null);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingVendor}
+                  className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-semibold"
+                >
+                  {creatingVendor ? 'Saving...' : 'Save Vendor'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

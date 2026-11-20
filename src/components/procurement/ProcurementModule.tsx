@@ -141,6 +141,20 @@ export const ProcurementModule: React.FC<ProcurementModuleProps> = ({
 
   // Fetch Procurement Data
   useEffect(() => {
+    setPurchaseRequests([]);
+    setRfqs([]);
+    setSupplierQuotes([]);
+    setPurchaseOrders([]);
+    setGoodsReceipts([]);
+    setDeliveryNotes([]);
+    setSupplierInvoices([]);
+    setThreeWayMatches([]);
+    setPurchaseApprovals([]);
+    setPayments([]);
+    setAnalyticsData(null);
+    setSuppliers([]);
+    setSelectedRfqId('');
+
     const fetchProcurementData = async () => {
       setLoading(true);
       try {
@@ -178,7 +192,7 @@ export const ProcurementModule: React.FC<ProcurementModuleProps> = ({
         if (Array.isArray(hierarchyRes)) setApprovalHierarchy(hierarchyRes);
         if (rfqRes.data) {
           setRfqs(rfqRes.data);
-          if (rfqRes.data.length > 0 && !selectedRfqId) {
+          if (rfqRes.data.length > 0) {
             setSelectedRfqId(rfqRes.data[0].rfq_id);
           }
         }
@@ -200,7 +214,7 @@ export const ProcurementModule: React.FC<ProcurementModuleProps> = ({
     };
 
     fetchProcurementData();
-  }, [refreshTrigger]);
+  }, [refreshTrigger, activeCompany?.code, activeCompany?.name]);
 
   // Actions
   const handleCreatePr = async (e: React.FormEvent) => {

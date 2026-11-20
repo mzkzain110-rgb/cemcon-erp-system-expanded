@@ -43,7 +43,10 @@ interface HRAdministrationModuleProps {
   session: any;
   departments: any[];
   employees: any[];
+  jobs?: any[];
   onRefreshEmployees: () => void;
+  onEmployeeCreated?: (emp: any) => void;
+  onEmployeeStatusUpdated?: (emp: any) => void;
   triggerGoogleSheetsSync?: () => void;
   sheetsSyncing?: boolean;
 }
@@ -52,7 +55,10 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
   session,
   departments,
   employees,
+  jobs = [],
   onRefreshEmployees,
+  onEmployeeCreated,
+  onEmployeeStatusUpdated,
   triggerGoogleSheetsSync,
   sheetsSyncing = false,
 }) => {
@@ -158,6 +164,18 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
   };
 
   useEffect(() => {
+    setEmployeeDocs([]);
+    setInsurancePolicies([]);
+    setVehicles([]);
+    setFines([]);
+    setMaintenanceLogs([]);
+    setRecruitmentRequests([]);
+    setCandidates([]);
+    setClearanceForms([]);
+    setAttendanceLogs([]);
+    setTimesheets([]);
+    setDeptFilter('ALL');
+    setSearchQuery('');
     fetchHRData();
   }, [session?.company?.company_id]);
 
@@ -259,6 +277,10 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
       });
 
       if (res.ok) {
+        const createdEmp = await res.json().catch(() => null);
+        if (createdEmp && createdEmp.employee_id && onEmployeeCreated) {
+          onEmployeeCreated(createdEmp);
+        }
         setIsRegisteringEmp(false);
         setNewEmpNo('');
         setNewEmpName('');
@@ -297,6 +319,10 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
       });
 
       if (res.ok) {
+        const updatedEmp = await res.json().catch(() => null);
+        if (updatedEmp && updatedEmp.employee_id && onEmployeeStatusUpdated) {
+          onEmployeeStatusUpdated(updatedEmp);
+        }
         onRefreshEmployees();
         fetchHRData();
       } else {
@@ -1157,6 +1183,7 @@ export const HRAdministrationModule: React.FC<HRAdministrationModuleProps> = ({
             session={session}
             departments={departments}
             employees={employees}
+            jobs={jobs}
             onRefreshEmployees={onRefreshEmployees}
             triggerGoogleSheetsSync={triggerGoogleSheetsSync}
           />
