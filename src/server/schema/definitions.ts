@@ -195,6 +195,8 @@ export const ERP_TAB_SCHEMAS: Record<string, TabSchema> = {
       { name: 'trade', type: 'string', required: false },
       { name: 'shift_hours', type: 'number', required: false },
       { name: 'ot_hours', type: 'number', required: false },
+      { name: 'job_id', type: 'uuid', required: false },
+      { name: 'job_number', type: 'string', required: false },
       { name: 'check_in', type: 'string', required: false },
       { name: 'check_out', type: 'string', required: false },
       { name: 'notes', type: 'string', required: false },
@@ -925,6 +927,8 @@ export const ERP_TAB_SCHEMAS: Record<string, TabSchema> = {
       { name: 'voucher_type', type: 'string', required: false, allowedValues: ['JV', 'PV', 'RV', 'EV', 'AV'] },
       { name: 'job_id', type: 'uuid', required: false },
       { name: 'job_number', type: 'string', required: false },
+      { name: 'supplier_id', type: 'uuid', required: false },
+      { name: 'supplier_name', type: 'string', required: false },
       { name: 'status', type: 'string', required: true, allowedValues: ['DRAFT', 'POSTED', 'REVERSED'] },
       { name: 'reversal_of_id', type: 'uuid', required: false },
       { name: 'created_by', type: 'uuid', required: true },
@@ -944,6 +948,8 @@ export const ERP_TAB_SCHEMAS: Record<string, TabSchema> = {
       { name: 'line_memo', type: 'string', required: false },
       { name: 'job_id', type: 'uuid', required: false },
       { name: 'job_number', type: 'string', required: false },
+      { name: 'supplier_id', type: 'uuid', required: false },
+      { name: 'supplier_name', type: 'string', required: false },
     ]
   },
   SalesInvoices: {

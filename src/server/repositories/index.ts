@@ -408,6 +408,8 @@ export interface JournalLineInput {
   lineMemo?: string;
   jobId?: string;
   jobNumber?: string;
+  supplierId?: string;
+  supplierName?: string;
 }
 
 export class AccountingRepository extends BaseRepository {
@@ -456,6 +458,8 @@ export class AccountingRepository extends BaseRepository {
       voucherType?: string;
       jobId?: string;
       jobNumber?: string;
+      supplierId?: string;
+      supplierName?: string;
     },
     context: SecurityContext
   ) {
@@ -525,6 +529,18 @@ export class AccountingRepository extends BaseRepository {
       const headerJobId = (entry as any).jobId || (entry as any).job_id || null;
       const headerJobNumber = (entry as any).jobNumber || (entry as any).job_number || null;
 
+      // Resolve Vendor / Supplier Info
+      const headerSupplierId = (entry as any).supplierId || (entry as any).supplier_id || null;
+      let headerSupplierName = (entry as any).supplierName || (entry as any).supplier_name || null;
+      if (headerSupplierId && !headerSupplierName) {
+        try {
+          const suppRow = await this.storage.getRowById<any>('Suppliers', headerSupplierId, context);
+          if (suppRow?.name) headerSupplierName = suppRow.name;
+        } catch {
+          // ignore lookup fallback
+        }
+      }
+
       // 3. Write Journal Entry Header
       const journalId = crypto.randomUUID();
       const savedJournal = await this.storage.writeRow(
@@ -543,6 +559,8 @@ export class AccountingRepository extends BaseRepository {
           voucher_type: vType,
           job_id: headerJobId,
           job_number: headerJobNumber,
+          supplier_id: headerSupplierId,
+          supplier_name: headerSupplierName,
           status: 'POSTED',
           reversal_of_id: null,
           created_by: context.userId,
@@ -560,6 +578,8 @@ export class AccountingRepository extends BaseRepository {
         line_memo: l.lineMemo || l.line_memo || entry.memo,
         job_id: l.jobId || l.job_id || headerJobId,
         job_number: l.jobNumber || l.job_number || headerJobNumber,
+        supplier_id: l.supplierId || l.supplier_id || headerSupplierId,
+        supplier_name: l.supplierName || l.supplier_name || headerSupplierName,
       }));
 
       await this.storage.batchWrite('JournalLines', lineRows, context);
@@ -1065,6 +1085,8 @@ export class AccountingRepository extends BaseRepository {
             memo: l.line_memo || j.memo,
             jobId: l.job_id || j.job_id || null,
             jobNumber: l.job_number || j.job_number || null,
+            supplierId: l.supplier_id || j.supplier_id || null,
+            supplierName: l.supplier_name || j.supplier_name || null,
             debit: parseFloat(String(l.debit || 0)),
             credit: parseFloat(String(l.credit || 0)),
           };
@@ -1195,18 +1217,28 @@ export class AccountingRepository extends BaseRepository {
   // 14. Cash Flow Reporting
   async getCashFlow(context: SecurityContext) {
     this.assertContext(context);
-    const pnl = await this.getProfitAndLoss(context);
+    const tb = await this.getTrialBalance(context);
     const receipts = await this.listReceipts(context);
     const payments = await this.listPayments(context);
 
     const totalReceipts = receipts.data.reduce((s, r) => s + parseFloat(String(r.amount || 0)), 0);
     const totalPayments = payments.data.reduce((s, p) => s + parseFloat(String(p.amount || 0)), 0);
 
+    const capitalExpenditure = tb.report
+      .filter((a) => a.accountCode.startsWith('15') && a.accountCode !== '1590')
+      .reduce((s, a) => s + Math.max(0, Number(a.totalDebit || 0)), 0);
+    const capitalInjections = tb.report
+      .filter((a) => a.accountCode === '3010' || a.accountCode === '2510')
+      .reduce((s, a) => s + Math.max(0, Number(a.totalCredit || 0)), 0);
+    const debtRepayments = tb.report
+      .filter((a) => a.accountCode === '2510')
+      .reduce((s, a) => s + Math.max(0, Number(a.totalDebit || 0)), 0);
+
     const operatingCashFlow = totalReceipts - totalPayments;
-    const investingCashFlow = -75000; // Machinery & plasma upgrade
-    const financingCashFlow = 0;
+    const investingCashFlow = -capitalExpenditure;
+    const financingCashFlow = capitalInjections - debtRepayments;
     const netCashChange = operatingCashFlow + investingCashFlow + financingCashFlow;
-    const beginningCash = 1000000;
+    const beginningCash = 0;
     const endingCash = beginningCash + netCashChange;
 
     return {
@@ -1216,12 +1248,12 @@ export class AccountingRepository extends BaseRepository {
         netOperating: operatingCashFlow,
       },
       investing: {
-        capitalExpenditure: 75000,
+        capitalExpenditure,
         netInvesting: investingCashFlow,
       },
       financing: {
-        capitalInjections: 0,
-        debtRepayments: 0,
+        capitalInjections,
+        debtRepayments,
         netFinancing: financingCashFlow,
       },
       netCashChange,
@@ -2195,6 +2227,10 @@ export class HRRepository extends BaseRepository {
       shift_hours?: number;
       ot_hours?: number;
       otHours?: number;
+      job_id?: string;
+      jobId?: string;
+      job_number?: string;
+      jobNumber?: string;
       notes?: string;
     },
     context: SecurityContext
@@ -2209,6 +2245,8 @@ export class HRRepository extends BaseRepository {
     const code = rawStatus.startsWith('P') ? 'P' : rawStatus.startsWith('A') ? 'A' : 'V';
     const shiftHours = code === 'P' ? 8 : code === 'V' ? 8 : 0;
     const otHours = Math.max(0, parseFloat(String(data.ot_hours ?? data.otHours ?? 0)));
+    const incomingJobId = data.job_id !== undefined ? data.job_id : data.jobId;
+    const incomingJobNo = data.job_number !== undefined ? data.job_number : data.jobNumber;
 
     const existing = await this.storage.readTab('Attendance', {
       tenantId: context.tenantId,
@@ -2230,7 +2268,9 @@ export class HRRepository extends BaseRepository {
           trade: data.trade !== undefined ? data.trade : rec.trade || '',
           shift_hours: shiftHours,
           ot_hours: otHours,
-          notes: data.notes || '',
+          job_id: incomingJobId !== undefined ? incomingJobId : rec.job_id || '',
+          job_number: incomingJobNo !== undefined ? incomingJobNo : rec.job_number || '',
+          notes: data.notes !== undefined ? data.notes : rec.notes || '',
         },
         context
       );
@@ -2249,6 +2289,8 @@ export class HRRepository extends BaseRepository {
           trade: data.trade || '',
           shift_hours: shiftHours,
           ot_hours: otHours,
+          job_id: incomingJobId || '',
+          job_number: incomingJobNo || '',
           notes: data.notes || '',
         },
         context
@@ -2267,6 +2309,10 @@ export class HRRepository extends BaseRepository {
       shift_hours?: number;
       ot_hours?: number;
       otHours?: number;
+      job_id?: string;
+      jobId?: string;
+      job_number?: string;
+      jobNumber?: string;
       notes?: string;
     }>,
     context: SecurityContext

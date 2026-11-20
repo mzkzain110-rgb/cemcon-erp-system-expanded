@@ -127,8 +127,9 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
         console.log('[StorageAdapter] Initializing live Google Sheets database...');
         const testRes = await googleSheetsClient.testLiveConnection();
         if (testRes.liveStatus === 'CONNECTED') {
-          console.log('[StorageAdapter] Remote connection established. Synchronizing 60 production tabs...');
+          console.log('[StorageAdapter] Remote connection established. Synchronizing production tabs...');
           await googleSheetsClient.initializeRemoteSpreadsheet(this.sheets);
+          await this.ensureMasterSeedsForAllCompanies(true);
         }
       } catch (err: any) {
         console.warn('[StorageAdapter] Google Sheets synchronization check:', err.message);
@@ -238,7 +239,7 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
 
     const total = filtered.length;
     const offset = query?.offset ?? 0;
-    const limit = query?.limit ?? 100;
+    const limit = query?.limit ?? 5000;
     const paged = filtered.slice(offset, offset + limit);
 
     return {
@@ -309,11 +310,18 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
     // Schema Validation
     this.validateRow(tabName, rowToSave, false);
 
-    // Uniqueness validation
+    // Uniqueness validation (scoped per company_id for multi-company tables on non-PK columns)
     const sheet = this.sheets.get(tabName)!;
+    const hasCompanyIdCol = schema.columns.some((c) => c.name === 'company_id');
     for (const col of schema.columns) {
-      if (col.unique && rowToSave[col.name] !== undefined) {
-        const duplicate = sheet.rows.find((r) => r[col.name] === rowToSave[col.name]);
+      if (col.unique && rowToSave[col.name] !== undefined && rowToSave[col.name] !== null && rowToSave[col.name] !== '') {
+        const duplicate = sheet.rows.find((r) => {
+          if (r[col.name] !== rowToSave[col.name]) return false;
+          if (!col.primaryKey && hasCompanyIdCol && rowToSave.company_id && r.company_id) {
+            return r.company_id === rowToSave.company_id;
+          }
+          return true;
+        });
         if (duplicate) {
           throw new Error(
             `Unique constraint violated on tab [${tabName}]: Column "${col.name}" value "${rowToSave[col.name]}" already exists.`
@@ -466,11 +474,16 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
       const liveStatus = await googleSheetsClient.testLiveConnection();
       if (liveStatus.liveStatus === 'CONNECTED') {
         const bootstrapResult = await googleSheetsClient.initializeRemoteSpreadsheet(this.sheets);
+        await this.ensureMasterSeedsForAllCompanies(true);
+        let refreshedTotalRows = 0;
+        for (const sheet of this.sheets.values()) {
+          refreshedTotalRows += sheet.rows.length;
+        }
         return {
           success: bootstrapResult.success,
           timestamp: new Date().toISOString(),
           syncedTabs: totalTabs,
-          totalRows,
+          totalRows: refreshedTotalRows,
           remoteSpreadsheetId: targetSheetId,
           message: bootstrapResult.message,
           details: {
@@ -769,21 +782,148 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
       }
     );
 
-    // User Companies
+    // User Companies: grant all 5 users access across all 3 CEMCON companies
     const ucSheet = this.sheets.get('UserCompanies')!;
-    ucSheet.rows.push(
-      { user_company_id: 'uc-1', tenant_id: tenantId, user_id: adminUserId, company_id: compMechId, role_id: adminRoleId, is_default: true, created_at: '2026-01-01T00:00:00.000Z' },
-      { user_company_id: 'uc-2', tenant_id: tenantId, user_id: adminUserId, company_id: compMeId, role_id: adminRoleId, is_default: false, created_at: '2026-01-01T00:00:00.000Z' },
-      { user_company_id: 'uc-3', tenant_id: tenantId, user_id: adminUserId, company_id: compFzeId, role_id: adminRoleId, is_default: false, created_at: '2026-01-01T00:00:00.000Z' },
-      { user_company_id: 'uc-4', tenant_id: tenantId, user_id: 'user-acc-002', company_id: compMechId, role_id: accountantRoleId, is_default: true, created_at: '2026-01-01T00:00:00.000Z' },
-      { user_company_id: 'uc-5', tenant_id: tenantId, user_id: 'user-eng-003', company_id: compMechId, role_id: engineerRoleId, is_default: true, created_at: '2026-01-01T00:00:00.000Z' },
-      { user_company_id: 'uc-6', tenant_id: tenantId, user_id: 'user-sales-004', company_id: compMechId, role_id: salesRoleId, is_default: true, created_at: '2026-01-01T00:00:00.000Z' },
-      { user_company_id: 'uc-7', tenant_id: tenantId, user_id: 'user-hr-005', company_id: compMechId, role_id: hrRoleId, is_default: true, created_at: '2026-01-01T00:00:00.000Z' }
-    );
+    const userRoleMappings = [
+      { userId: adminUserId, roleId: adminRoleId, isDefault: true },
+      { userId: 'user-acc-002', roleId: accountantRoleId, isDefault: true },
+      { userId: 'user-eng-003', roleId: engineerRoleId, isDefault: true },
+      { userId: 'user-sales-004', roleId: salesRoleId, isDefault: true },
+      { userId: 'user-hr-005', roleId: hrRoleId, isDefault: true },
+    ];
+    let ucCounter = 1;
+    for (const ur of userRoleMappings) {
+      for (const comp of cemconCompanies) {
+        ucSheet.rows.push({
+          user_company_id: `uc-${ucCounter++}`,
+          tenant_id: tenantId,
+          user_id: ur.userId,
+          company_id: comp.id,
+          role_id: ur.roleId,
+          is_default: comp.id === compMechId ? ur.isDefault : false,
+          created_at: '2026-01-01T00:00:00.000Z',
+        });
+      }
+    }
 
-    // 5. Chart of Accounts (standard double-entry chart for mechanical engineering / contracting)
+    // 5. Chart of Accounts, Warehouses, Bank Accounts, Approval Workflows across ALL 3 Companies
+    const seedAccounts = this.getStandardCoaTemplate();
     const accountsSheet = this.sheets.get('Accounts')!;
-    const seedAccounts = [
+    const whSheet = this.sheets.get('Warehouses')!;
+    const bankSheet = this.sheets.get('BankAccounts')!;
+    const awSheet = this.sheets.get('ApprovalWorkflows')!;
+
+    for (const comp of cemconCompanies) {
+      const idPrefix = comp.id === compMechId ? '' : `${comp.prefix}-`;
+
+      for (const a of seedAccounts) {
+        accountsSheet.rows.push({
+          account_id: comp.id === compMechId ? a.id : `acc-${comp.prefix}-${a.code}`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          account_code: a.code,
+          account_name: a.name,
+          account_type: a.type,
+          normal_balance: a.normal,
+          is_active: true,
+        });
+      }
+
+      whSheet.rows.push(
+        {
+          warehouse_id: `wh-${idPrefix}001`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          code: 'WH-ALQUOZ',
+          name: 'Al Quoz Central Heavy Fabrication Yard',
+          location: 'Industrial Area 3, Dubai, UAE',
+          is_active: true,
+        },
+        {
+          warehouse_id: `wh-${idPrefix}002`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          code: 'WH-JEBELALI',
+          name: 'Jebel Ali Free Zone Logistics Hub',
+          location: 'JAFZA South, Dubai, UAE',
+          is_active: true,
+        }
+      );
+
+      bankSheet.rows.push(
+        {
+          bank_account_id: `bank-${idPrefix}001`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          bank_name: 'Emirates NBD',
+          account_number: comp.id === compMechId ? '030260001010123456789' : comp.id === compMeId ? '030260002020123456789' : '030260003030123456789',
+          iban: comp.id === compMechId ? 'AE030260001010123456789' : comp.id === compMeId ? 'AE030260002020123456789' : 'AE030260003030123456789',
+          currency: 'AED',
+          gl_account_id: comp.id === compMechId ? 'acc-1010' : `acc-${comp.prefix}-1010`,
+        },
+        {
+          bank_account_id: `bank-${idPrefix}002`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          bank_name: 'Abu Dhabi Commercial Bank (ADCB)',
+          account_number: comp.id === compMechId ? '0230002020987654321' : comp.id === compMeId ? '0230002020987654322' : '0230002020987654323',
+          iban: comp.id === compMechId ? 'AE550230002020987654321' : comp.id === compMeId ? 'AE550230002020987654322' : 'AE550230002020987654323',
+          currency: 'AED',
+          gl_account_id: comp.id === compMechId ? 'acc-1012' : `acc-${comp.prefix}-1012`,
+        },
+        {
+          bank_account_id: `bank-${idPrefix}003`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          bank_name: 'First Abu Dhabi Bank (FAB)',
+          account_number: comp.id === compMechId ? '0150003030456123789' : comp.id === compMeId ? '0150003030456123790' : '0150003030456123791',
+          iban: comp.id === compMechId ? 'AE440150003030456123789' : comp.id === compMeId ? 'AE440150003030456123790' : 'AE440150003030456123791',
+          currency: 'AED',
+          gl_account_id: comp.id === compMechId ? 'acc-1015' : `acc-${comp.prefix}-1015`,
+        },
+        {
+          bank_account_id: `bank-${idPrefix}004`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          bank_name: 'Petty Cash Float (Yard Vault)',
+          account_number: `PETTY-CASH-${comp.prefix.toUpperCase()}-01`,
+          iban: 'N/A (Physical Cash Vault)',
+          currency: 'AED',
+          gl_account_id: comp.id === compMechId ? 'acc-1018' : `acc-${comp.prefix}-1018`,
+        }
+      );
+
+      awSheet.rows.push(
+        {
+          workflow_id: `wf-${idPrefix}po-01`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          module: 'PURCHASE_ORDER',
+          threshold_amount: 10000.0,
+          is_active: true,
+        },
+        {
+          workflow_id: `wf-${idPrefix}pr-02`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          module: 'PURCHASE_REQUEST',
+          threshold_amount: 10000.0,
+          is_active: true,
+        },
+        {
+          workflow_id: `wf-${idPrefix}leave-03`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          module: 'LEAVE',
+          threshold_amount: 0.0,
+          is_active: true,
+        }
+      );
+    }
+  }
+
+  private getStandardCoaTemplate() {
+    return [
       { id: 'acc-1010', code: '1010', name: 'Cash and Bank - Emirates NBD Corporate (AED)', type: 'ASSET', normal: 'DEBIT' },
       { id: 'acc-1012', code: '1012', name: 'Cash and Bank - Abu Dhabi Commercial Bank Escrow (AED)', type: 'ASSET', normal: 'DEBIT' },
       { id: 'acc-1015', code: '1015', name: 'Cash and Bank - First Abu Dhabi Bank L/C Facility (AED)', type: 'ASSET', normal: 'DEBIT' },
@@ -820,157 +960,187 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
       { id: 'acc-6040', code: '6040', name: 'Fleet Insurance, Diesel & Transport Road Tolls', type: 'EXPENSE', normal: 'DEBIT' },
       { id: 'acc-7010', code: '7010', name: 'UAE Corporate Tax Expense (9%)', type: 'EXPENSE', normal: 'DEBIT' },
     ];
+  }
 
-    for (const a of seedAccounts) {
-      accountsSheet.rows.push({
-        account_id: a.id,
-        tenant_id: tenantId,
-        company_id: compMechId,
-        account_code: a.code,
-        account_name: a.name,
-        account_type: a.type,
-        normal_balance: a.normal,
-        is_active: true,
-      });
+  /**
+   * Ensures all 3 companies have complete master configuration rows even when hydrating
+   * from an existing Google Sheet that previously only seeded Company 1.
+   */
+  private async ensureMasterSeedsForAllCompanies(pushRemote = false): Promise<void> {
+    const tenantId = 'tenant-cemcon-001';
+    const companies = [
+      { id: 'comp-cemcon-mech-01', prefix: 'mech', code: 'CEMCON-MECH', name: 'Cemcon Mechanical Engineering LLC', legalType: 'LLC', seqId: 'seq-mech-01' },
+      { id: 'comp-cemcon-me-02', prefix: 'me', code: 'CEMCON-ME', name: 'CEMCON Middle East LLC', legalType: 'LLC', seqId: 'seq-me-02' },
+      { id: 'comp-cemcon-fze-03', prefix: 'fze', code: 'CEMCON-FZE', name: 'CEMCON FZE', legalType: 'FZE', seqId: 'seq-fze-03' },
+    ];
+
+    const appendIfMissing = async (tabName: string, predicate: (row: any) => boolean, row: Record<string, any>) => {
+      const sheet = this.sheets.get(tabName);
+      if (!sheet) return;
+      if (sheet.rows.some(predicate)) return;
+      sheet.rows.push(row);
+      if (pushRemote && googleSheetsClient.isLiveReady()) {
+        const rowArr = sheet.headers.map((h) => (row[h] !== undefined && row[h] !== null ? row[h] : ''));
+        try {
+          await googleSheetsClient.appendRow(tabName, rowArr);
+        } catch (err: any) {
+          console.warn(`[StorageAdapter] Remote backfill failed for ${tabName}:`, err.message);
+        }
+      }
+    };
+
+    const deptList = [
+      { name: 'Accounts & Finance', code: 'ACC-FIN' },
+      { name: 'HR & Administration', code: 'HR-ADM' },
+      { name: 'Sales & Marketing', code: 'SALES-MKT' },
+      { name: 'Design & Estimation', code: 'DSGN-EST' },
+      { name: 'Procurement', code: 'PROC' },
+      { name: 'Store & Logistics', code: 'STR-LOG' },
+      { name: 'Production/Workshop', code: 'PROD-WKP' },
+      { name: 'QA/QC ( Quality Assurance & Quality Control)', code: 'QA-QC' },
+      { name: 'HSE( Health , Safety & Environment)', code: 'HSE' },
+    ];
+    const coaTemplate = this.getStandardCoaTemplate();
+
+    for (const comp of companies) {
+      const idPrefix = comp.id === 'comp-cemcon-mech-01' ? '' : `${comp.prefix}-`;
+
+      await appendIfMissing(
+        'Companies',
+        (r) => r.company_id === comp.id,
+        {
+          company_id: comp.id,
+          tenant_id: tenantId,
+          company_code: comp.code,
+          company_name: comp.name,
+          legal_type: comp.legalType,
+          currency: 'AED',
+          country: 'United Arab Emirates',
+          status: 'ACTIVE',
+          created_at: '2026-01-01T00:00:00.000Z',
+          updated_at: '2026-01-01T00:00:00.000Z',
+        }
+      );
+
+      await appendIfMissing(
+        'JobSequences',
+        (r) => r.company_id === comp.id,
+        {
+          sequence_id: comp.seqId,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          prefix: '',
+          current_sequence: 0,
+          pad_digits: 4,
+          updated_at: '2026-01-01T00:00:00.000Z',
+        }
+      );
+
+      for (let i = 0; i < deptList.length; i++) {
+        const d = deptList[i];
+        await appendIfMissing(
+          'Departments',
+          (r) => r.company_id === comp.id && r.code === d.code,
+          {
+            department_id: `dept-${comp.prefix}-${String(i + 1).padStart(2, '0')}`,
+            tenant_id: tenantId,
+            company_id: comp.id,
+            name: d.name,
+            code: d.code,
+            status: 'ACTIVE',
+          }
+        );
+      }
+
+      for (const a of coaTemplate) {
+        await appendIfMissing(
+          'Accounts',
+          (r) => r.company_id === comp.id && r.account_code === a.code,
+          {
+            account_id: comp.id === 'comp-cemcon-mech-01' ? a.id : `acc-${comp.prefix}-${a.code}`,
+            tenant_id: tenantId,
+            company_id: comp.id,
+            account_code: a.code,
+            account_name: a.name,
+            account_type: a.type,
+            normal_balance: a.normal,
+            is_active: true,
+          }
+        );
+      }
+
+      await appendIfMissing(
+        'Warehouses',
+        (r) => r.company_id === comp.id && r.code === 'WH-ALQUOZ',
+        {
+          warehouse_id: `wh-${idPrefix}001`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          code: 'WH-ALQUOZ',
+          name: 'Al Quoz Central Heavy Fabrication Yard',
+          location: 'Industrial Area 3, Dubai, UAE',
+          is_active: true,
+        }
+      );
+
+      await appendIfMissing(
+        'Warehouses',
+        (r) => r.company_id === comp.id && r.code === 'WH-JEBELALI',
+        {
+          warehouse_id: `wh-${idPrefix}002`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          code: 'WH-JEBELALI',
+          name: 'Jebel Ali Free Zone Logistics Hub',
+          location: 'JAFZA South, Dubai, UAE',
+          is_active: true,
+        }
+      );
+
+      const bankSeeds = [
+        { suffix: '001', name: 'Emirates NBD', glCode: '1010', acct: `03026000${comp.id === 'comp-cemcon-mech-01' ? '1010' : comp.id === 'comp-cemcon-me-02' ? '2020' : '3030'}123456789`, iban: `AE03026000${comp.id === 'comp-cemcon-mech-01' ? '1010' : comp.id === 'comp-cemcon-me-02' ? '2020' : '3030'}123456789` },
+        { suffix: '002', name: 'Abu Dhabi Commercial Bank (ADCB)', glCode: '1012', acct: `023000202098765432${comp.prefix === 'mech' ? '1' : comp.prefix === 'me' ? '2' : '3'}`, iban: `AE55023000202098765432${comp.prefix === 'mech' ? '1' : comp.prefix === 'me' ? '2' : '3'}` },
+        { suffix: '003', name: 'First Abu Dhabi Bank (FAB)', glCode: '1015', acct: `015000303045612378${comp.prefix === 'mech' ? '9' : comp.prefix === 'me' ? '0' : '1'}`, iban: `AE44015000303045612378${comp.prefix === 'mech' ? '9' : comp.prefix === 'me' ? '0' : '1'}` },
+        { suffix: '004', name: 'Petty Cash Float (Yard Vault)', glCode: '1018', acct: `PETTY-CASH-${comp.prefix.toUpperCase()}-01`, iban: 'N/A (Physical Cash Vault)' },
+      ];
+      for (const b of bankSeeds) {
+        const glRow = this.sheets.get('Accounts')?.rows.find((r) => r.company_id === comp.id && r.account_code === b.glCode);
+        await appendIfMissing(
+          'BankAccounts',
+          (r) => r.company_id === comp.id && r.bank_name === b.name,
+          {
+            bank_account_id: `bank-${idPrefix}${b.suffix}`,
+            tenant_id: tenantId,
+            company_id: comp.id,
+            bank_name: b.name,
+            account_number: b.acct,
+            iban: b.iban,
+            currency: 'AED',
+            gl_account_id: glRow?.account_id || (comp.id === 'comp-cemcon-mech-01' ? `acc-${b.glCode}` : `acc-${comp.prefix}-${b.glCode}`),
+          }
+        );
+      }
+
+      const wfSeeds = [
+        { id: `wf-${idPrefix}po-01`, module: 'PURCHASE_ORDER', threshold: 10000.0 },
+        { id: `wf-${idPrefix}pr-02`, module: 'PURCHASE_REQUEST', threshold: 10000.0 },
+        { id: `wf-${idPrefix}leave-03`, module: 'LEAVE', threshold: 0.0 },
+      ];
+      for (const w of wfSeeds) {
+        await appendIfMissing(
+          'ApprovalWorkflows',
+          (r) => r.company_id === comp.id && r.module === w.module,
+          {
+            workflow_id: w.id,
+            tenant_id: tenantId,
+            company_id: comp.id,
+            module: w.module,
+            threshold_amount: w.threshold,
+            is_active: true,
+          }
+        );
+      }
     }
-
-    // 5. Warehouses
-    const whSheet = this.sheets.get('Warehouses')!;
-    whSheet.rows.push(
-      {
-        warehouse_id: 'wh-001',
-        tenant_id: tenantId,
-        company_id: compMechId,
-        code: 'WH-ALQUOZ',
-        name: 'Al Quoz Central Heavy Fabrication Yard',
-        location: 'Industrial Area 3, Dubai, UAE',
-        is_active: true,
-      },
-      {
-        warehouse_id: 'wh-002',
-        tenant_id: tenantId,
-        company_id: compMechId,
-        code: 'WH-JEBELALI',
-        name: 'Jebel Ali Free Zone Logistics Hub',
-        location: 'JAFZA South, Dubai, UAE',
-        is_active: true,
-      }
-    );
-
-
-    // Bank Accounts Seed
-    const bankSheet = this.sheets.get('BankAccounts')!;
-    bankSheet.rows.push(
-      {
-        bank_account_id: 'bank-001',
-        tenant_id: tenantId,
-        company_id: compMechId,
-        bank_name: 'Emirates NBD',
-        account_number: '030260001010123456789',
-        iban: 'AE030260001010123456789',
-        currency: 'AED',
-        gl_account_id: 'acc-1010',
-      },
-      {
-        bank_account_id: 'bank-002',
-        tenant_id: tenantId,
-        company_id: compMechId,
-        bank_name: 'Abu Dhabi Commercial Bank (ADCB)',
-        account_number: '0230002020987654321',
-        iban: 'AE550230002020987654321',
-        currency: 'AED',
-        gl_account_id: 'acc-1012',
-      },
-      {
-        bank_account_id: 'bank-003',
-        tenant_id: tenantId,
-        company_id: compMechId,
-        bank_name: 'First Abu Dhabi Bank (FAB)',
-        account_number: '0150003030456123789',
-        iban: 'AE440150003030456123789',
-        currency: 'AED',
-        gl_account_id: 'acc-1015',
-      },
-      {
-        bank_account_id: 'bank-004',
-        tenant_id: tenantId,
-        company_id: compMechId,
-        bank_name: 'Petty Cash Float (Yard Vault)',
-        account_number: 'PETTY-CASH-YARD-01',
-        iban: 'N/A (Physical Cash Vault Al Quoz)',
-        currency: 'AED',
-        gl_account_id: 'acc-1018',
-      }
-    );
-
-
-    // Quotations (Clean slate for client handover)
-    const quoteSheet = this.sheets.get('Quotations')!;
-
-    // Sales Invoices
-    const salesInvSheet = this.sheets.get('SalesInvoices')!;
-
-    // Purchase Invoices
-    const purInvSheet = this.sheets.get('PurchaseInvoices')!;
-
-    // Delivery Notes
-    const dnSheet = this.sheets.get('DeliveryNotes')!;
-
-    // Receipts & Payments
-    const recSheet = this.sheets.get('Receipts')!;
-    const paySheet = this.sheets.get('Payments')!;
-
-    // Procurement Suite (Clean slate for client handover)
-    const prSheet = this.sheets.get('PurchaseRequests')!;
-    const rfqSheet = this.sheets.get('RFQs')!;
-    const sqSheet = this.sheets.get('SupplierQuotations')!;
-    const poSheet = this.sheets.get('PurchaseOrders')!;
-    const grnSheet = this.sheets.get('GoodsReceipts')!;
-
-    // Initial Approval Workflows & Sample Pending Approval Request
-    const awSheet = this.sheets.get('ApprovalWorkflows')!;
-    awSheet.rows.push(
-      {
-        workflow_id: 'wf-po-01',
-        tenant_id: tenantId,
-        company_id: compMechId,
-        module: 'PURCHASE_ORDER',
-        threshold_amount: 10000.0,
-        is_active: true,
-      },
-      {
-        workflow_id: 'wf-pr-02',
-        tenant_id: tenantId,
-        company_id: compMechId,
-        module: 'PURCHASE_REQUEST',
-        threshold_amount: 10000.0,
-        is_active: true,
-      },
-      {
-        workflow_id: 'wf-leave-03',
-        tenant_id: tenantId,
-        company_id: compMechId,
-        module: 'LEAVE',
-        threshold_amount: 0.0,
-        is_active: true,
-      }
-    );
-
-    // Operational Sheets (Initialized clean for user entries)
-    const arSheet = this.sheets.get('ApprovalRequests')!;
-    const docSheet = this.sheets.get('Documents')!;
-    const pdcSheet = this.sheets.get('PDCRegister')!;
-    const empDocSheet = this.sheets.get('EmployeeDocuments')!;
-    const insSheet = this.sheets.get('InsurancePolicies')!;
-    const vehSheet = this.sheets.get('Vehicles')!;
-    const fineSheet = this.sheets.get('VehicleFines')!;
-    const maintSheet = this.sheets.get('VehicleMaintenance')!;
-    const recruitSheet = this.sheets.get('RecruitmentRequests')!;
-    const candSheet = this.sheets.get('Candidates')!;
-    const clrSheet = this.sheets.get('ClearanceForms')!;
-    const attSheet = this.sheets.get('Attendance')!;
-    const tsSheet = this.sheets.get('Timesheets')!;
-    const otSheet = this.sheets.get('OvertimeRequests')!;
   }
 }
 
