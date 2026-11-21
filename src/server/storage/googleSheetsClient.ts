@@ -37,6 +37,24 @@ export class GoogleSheetsServiceAccountClient {
     this.refreshAuth();
   }
 
+  private extractSheetId(raw?: string | null): string | null {
+    if (!raw) return null;
+    const cleaned = raw.trim().replace(/^["']|["']$/g, '').trim();
+    if (!cleaned) return null;
+    const urlMatch = cleaned.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    return urlMatch ? urlMatch[1] : cleaned;
+  }
+
+  private normalizePrivateKey(raw?: string | null): string | null {
+    if (!raw) return null;
+    const cleaned = raw.trim().replace(/^["']|["']$/g, '').trim();
+    if (!cleaned) return null;
+    return cleaned
+      .replace(/\\\\n/g, '\n')
+      .replace(/\\n/g, '\n')
+      .replace(/\r\n/g, '\n');
+  }
+
   public refreshAuth(): boolean {
     const rawProjectId = process.env.GOOGLE_PROJECT_ID;
     const rawClientEmail = process.env.GOOGLE_CLIENT_EMAIL;
@@ -45,8 +63,8 @@ export class GoogleSheetsServiceAccountClient {
 
     const projectId = rawProjectId ? rawProjectId.trim().replace(/^["']|["']$/g, '').trim() : null;
     const clientEmail = rawClientEmail ? rawClientEmail.trim().replace(/^["']|["']$/g, '').trim() : null;
-    const sheetId = rawSheetId ? rawSheetId.trim().replace(/^["']|["']$/g, '').trim() : null;
-    let privateKey = rawPrivateKey ? rawPrivateKey.trim().replace(/^["']|["']$/g, '').trim() : null;
+    const sheetId = this.extractSheetId(rawSheetId);
+    const privateKey = this.normalizePrivateKey(rawPrivateKey);
 
     if (!clientEmail || !privateKey || !sheetId) {
       this.sheetsApi = null;
@@ -66,9 +84,6 @@ export class GoogleSheetsServiceAccountClient {
     }
 
     try {
-      // Normalize private key: strip outer quotes, replace literal \n with real newline characters
-      privateKey = privateKey.replace(/\\n/g, '\n');
-
       this.authClient = new google.auth.JWT({
         email: clientEmail,
         key: privateKey,
@@ -108,11 +123,17 @@ export class GoogleSheetsServiceAccountClient {
   }
 
   public getStatus(): ServiceAccountStatus {
+    if (!this.initialized && process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID) {
+      this.refreshAuth();
+    }
     return { ...this.lastStatus };
   }
 
   public isLiveReady(): boolean {
-    return this.initialized && this.sheetsApi !== null && !!process.env.GOOGLE_SHEET_ID;
+    if (!this.initialized && process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID) {
+      this.refreshAuth();
+    }
+    return this.initialized && this.sheetsApi !== null && !!this.extractSheetId(process.env.GOOGLE_SHEET_ID);
   }
 
   /**
@@ -123,7 +144,7 @@ export class GoogleSheetsServiceAccountClient {
       return this.getStatus();
     }
 
-    const sheetId = (process.env.GOOGLE_SHEET_ID || '').trim().replace(/^["']|["']$/g, '');
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || '';
 
     try {
       const response = await this.sheetsApi!.spreadsheets.get({
@@ -192,7 +213,7 @@ export class GoogleSheetsServiceAccountClient {
    */
   public async ensureTabExists(tabName: string, headers: string[]): Promise<boolean> {
     if (!this.isLiveReady()) return false;
-    const sheetId = (process.env.GOOGLE_SHEET_ID || '').trim().replace(/^["']|["']$/g, '');
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || '';
     try {
       const meta = await this.sheetsApi!.spreadsheets.get({ spreadsheetId: sheetId });
       const exists = (meta.data.sheets || []).some((s) => s.properties?.title === tabName);
@@ -239,7 +260,7 @@ export class GoogleSheetsServiceAccountClient {
   public async appendRowsBatch(tabName: string, rowsValues: any[][], headersForFallback?: string[]): Promise<boolean> {
     if (rowsValues.length === 0) return true;
     if (!this.isLiveReady() && !this.refreshAuth()) return false;
-    const sheetId = (process.env.GOOGLE_SHEET_ID || '').trim().replace(/^["']|["']$/g, '');
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || '';
     const formattedRows = rowsValues.map((row) => row.map((v) => this.formatCellValue(v)));
 
     try {
@@ -282,7 +303,7 @@ export class GoogleSheetsServiceAccountClient {
    */
   public async updateRow(tabName: string, rowIndex: number, rowValues: any[]): Promise<boolean> {
     if (!this.isLiveReady()) return false;
-    const sheetId = (process.env.GOOGLE_SHEET_ID || '').trim().replace(/^["']|["']$/g, '');
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || '';
 
     try {
       const formatted = rowValues.map((v) => this.formatCellValue(v));
@@ -306,7 +327,7 @@ export class GoogleSheetsServiceAccountClient {
    */
   public async deleteRow(tabName: string, rowIndex: number): Promise<boolean> {
     if (!this.isLiveReady()) return false;
-    const sheetId = (process.env.GOOGLE_SHEET_ID || '').trim().replace(/^["']|["']$/g, '');
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || '';
 
     try {
       const meta = await this.sheetsApi!.spreadsheets.get({ spreadsheetId: sheetId });
@@ -342,7 +363,7 @@ export class GoogleSheetsServiceAccountClient {
    */
   public async readTabValues(tabName: string): Promise<any[][] | null> {
     if (!this.isLiveReady()) return null;
-    const sheetId = (process.env.GOOGLE_SHEET_ID || '').trim().replace(/^["']|["']$/g, '');
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || '';
 
     try {
       const res = await this.sheetsApi!.spreadsheets.values.get({
@@ -362,7 +383,7 @@ export class GoogleSheetsServiceAccountClient {
   public async loadAllRemoteTabsData(): Promise<Map<string, any[][]>> {
     const resultMap = new Map<string, any[][]>();
     if (!this.isLiveReady()) return resultMap;
-    const sheetId = (process.env.GOOGLE_SHEET_ID || '').trim().replace(/^["']|["']$/g, '');
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || '';
 
     try {
       const tabNames = Object.keys(ERP_TAB_SCHEMAS);
@@ -408,7 +429,7 @@ export class GoogleSheetsServiceAccountClient {
       };
     }
 
-    const sheetId = (process.env.GOOGLE_SHEET_ID || '').trim().replace(/^["']|["']$/g, '');
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || '';
     let createdTabs = 0;
     let syncedRows = 0;
 
@@ -563,11 +584,29 @@ export class GoogleSheetsServiceAccountClient {
       };
     } catch (err: any) {
       console.error('[GoogleSheetsSync] Failed to initialize spreadsheet:', err.message);
+      let statusType: ServiceAccountStatus['liveStatus'] = 'ERROR';
+      let message = err.message;
+      if (err.code === 403 || err.message?.includes('permission') || err.message?.includes('IAM')) {
+        statusType = 'PERMISSION_DENIED';
+        message = `Permission Denied: Please share spreadsheet (${sheetId}) with "${process.env.GOOGLE_CLIENT_EMAIL}" as "Editor".`;
+      } else if (err.code === 404 || err.message?.includes('not found')) {
+        statusType = 'SPREADSHEET_NOT_FOUND';
+        message = `Spreadsheet Not Found: Please verify that GOOGLE_SHEET_ID "${sheetId}" exists.`;
+      }
+      this.lastStatus = {
+        isConfigured: true,
+        projectId: process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, '') || null,
+        clientEmail: process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, '') || null,
+        sheetId,
+        liveStatus: statusType,
+        statusMessage: message,
+        lastChecked: new Date().toISOString(),
+      };
       return {
         success: false,
         createdTabsCount: createdTabs,
         syncedRowsCount: syncedRows,
-        message: `Failed to bootstrap remote spreadsheet: ${err.message}`,
+        message: `Failed to bootstrap remote spreadsheet: ${message}`,
       };
     }
   }

@@ -62,8 +62,21 @@ app.use('/api', (_req, res, next) => {
   next();
 });
 
-// Initialize Database Storage
-await globalStorageAdapter.init();
+// Initialize Database Storage safely (non-fatal at module load; awaited by /api middleware)
+try {
+  await globalStorageAdapter.init();
+} catch (err: any) {
+  console.error('[Server] Non-fatal initial storage hydration error:', err?.message || err);
+}
+
+app.use('/api', async (_req, _res, next) => {
+  try {
+    await globalStorageAdapter.init();
+  } catch (err: any) {
+    console.error('[Server] Storage init check failed:', err?.message || err);
+  }
+  next();
+});
 
 // Initialize Repositories
 const tenantRepo = new TenantRepository(globalStorageAdapter);

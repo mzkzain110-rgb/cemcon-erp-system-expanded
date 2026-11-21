@@ -237,20 +237,26 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
 
     this.initPromise = (async () => {
       this.seedInitialData();
+      googleSheetsClient.refreshAuth();
 
       if (googleSheetsClient.isLiveReady()) {
         try {
           console.log('[StorageAdapter] Initializing live Google Sheets database...');
-          const testRes = await googleSheetsClient.testLiveConnection();
-          if (testRes.liveStatus === 'CONNECTED') {
-            console.log('[StorageAdapter] Remote connection established. Synchronizing production tabs...');
-            await googleSheetsClient.initializeRemoteSpreadsheet(this.sheets);
+          const syncRes = await googleSheetsClient.initializeRemoteSpreadsheet(this.sheets);
+          if (syncRes.success) {
             this.coerceAllLoadedSheets();
             await this.ensureMasterSeedsForAllCompanies(true);
+            this.saveLocalSnapshot();
+          } else {
+            this.loadLocalSnapshot();
+            await this.ensureMasterSeedsForAllCompanies(false);
             this.saveLocalSnapshot();
           }
         } catch (err: any) {
           console.warn('[StorageAdapter] Google Sheets synchronization check:', err.message);
+          this.loadLocalSnapshot();
+          await this.ensureMasterSeedsForAllCompanies(false);
+          this.saveLocalSnapshot();
         }
       } else {
         const loaded = this.loadLocalSnapshot();
@@ -1182,6 +1188,7 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
       { id: 'comp-cemcon-fze-03', prefix: 'fze', code: 'CEMCON-FZE', name: 'CEMCON FZE', legalType: 'FZE', seqId: 'seq-fze-03' },
     ];
 
+    const pendingRemoteRows = new Map<string, any[][]>();
     const appendIfMissing = async (tabName: string, predicate: (row: any) => boolean, row: Record<string, any>) => {
       const sheet = this.sheets.get(tabName);
       if (!sheet) return;
@@ -1189,11 +1196,9 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
       sheet.rows.push(row);
       if (pushRemote && googleSheetsClient.isLiveReady()) {
         const rowArr = sheet.headers.map((h) => (row[h] !== undefined && row[h] !== null ? row[h] : ''));
-        try {
-          await googleSheetsClient.appendRow(tabName, rowArr);
-        } catch (err: any) {
-          console.warn(`[StorageAdapter] Remote backfill failed for ${tabName}:`, err.message);
-        }
+        const list = pendingRemoteRows.get(tabName) || [];
+        list.push(rowArr);
+        pendingRemoteRows.set(tabName, list);
       }
     };
 
@@ -1347,6 +1352,18 @@ export class GoogleSheetsStorageAdapter implements IStorageAdapter {
             is_active: true,
           }
         );
+      }
+    }
+
+    if (pushRemote && pendingRemoteRows.size > 0 && googleSheetsClient.isLiveReady()) {
+      for (const [tabName, rowsArr] of pendingRemoteRows.entries()) {
+        const sheet = this.sheets.get(tabName);
+        if (!sheet) continue;
+        try {
+          await googleSheetsClient.appendRowsBatch(tabName, rowsArr, sheet.headers);
+        } catch (err: any) {
+          console.warn(`[StorageAdapter] Remote batch backfill failed for ${tabName}:`, err.message);
+        }
       }
     }
   }

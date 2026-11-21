@@ -3,7 +3,7 @@
  * Architecture: React + TypeScript + Express + Repository Layer + Google Sheets Database
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, useState, useEffect } from 'react';
 import {
   Building2,
   Briefcase,
@@ -45,15 +45,28 @@ import {
   Calculator,
   Banknote,
 } from 'lucide-react';
-import { HRAdministrationModule } from './components/hr/HRAdministrationModule';
 import { JobOrderModal } from './components/jobs/JobOrderModal';
-import { JobEstimationModule } from './components/jobs/JobEstimationModule';
 import { CEMCON_COMPANIES } from './components/hr/HRPrintableForms';
 import { exportJobOrderPdf } from './utils/corporatePdfGenerator';
-import { FinanceModule } from './components/finance/FinanceModule';
-import { ProcurementModule } from './components/procurement/ProcurementModule';
-import { MonthlyAttendanceModule } from './components/hr/MonthlyAttendanceModule';
-import { SalaryModule } from './components/salary/SalaryModule';
+
+const HRAdministrationModule = React.lazy(() =>
+  import('./components/hr/HRAdministrationModule').then((m) => ({ default: m.HRAdministrationModule }))
+);
+const JobEstimationModule = React.lazy(() =>
+  import('./components/jobs/JobEstimationModule').then((m) => ({ default: m.JobEstimationModule }))
+);
+const FinanceModule = React.lazy(() =>
+  import('./components/finance/FinanceModule').then((m) => ({ default: m.FinanceModule }))
+);
+const ProcurementModule = React.lazy(() =>
+  import('./components/procurement/ProcurementModule').then((m) => ({ default: m.ProcurementModule }))
+);
+const MonthlyAttendanceModule = React.lazy(() =>
+  import('./components/hr/MonthlyAttendanceModule').then((m) => ({ default: m.MonthlyAttendanceModule }))
+);
+const SalaryModule = React.lazy(() =>
+  import('./components/salary/SalaryModule').then((m) => ({ default: m.SalaryModule }))
+);
 
 interface SessionData {
   session: {
@@ -107,9 +120,14 @@ async function safeExtractError(res: Response, fallback = 'Operation failed'): P
   }
 }
 
-async function safeFetchJson<T = any>(url: string, init?: RequestInit): Promise<T | null> {
+async function safeFetchJson<T = any>(url: string, init?: RequestInit, timeoutMs = 10000): Promise<T | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, init);
+    const res = await fetch(url, {
+      ...init,
+      signal: init?.signal ?? controller.signal,
+    });
     if (!res.ok) {
       console.warn(`Request to ${url} returned status ${res.status}`);
       return null;
@@ -120,6 +138,8 @@ async function safeFetchJson<T = any>(url: string, init?: RequestInit): Promise<
   } catch (err) {
     console.error(`Error fetching ${url}:`, err);
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -234,21 +254,24 @@ export default function App() {
 
   const fetchSession = async () => {
     try {
+      safeFetchJson<any>('/api/sheets/service-account').then((saData) => {
+        if (saData) setServiceAccountInfo(saData);
+      });
       const data = await safeFetchJson<SessionData>('/api/auth/session');
       if (data) {
         if (typeof window !== 'undefined') {
-          if (data.company?.company_id) {
-            window.localStorage.setItem('cemcon_company_id', data.company.company_id);
-          }
-          if (data.session?.userId) {
-            window.localStorage.setItem('cemcon_user_id', data.session.userId);
+          try {
+            if (data.company?.company_id) {
+              window.localStorage.setItem('cemcon_company_id', data.company.company_id);
+            }
+            if (data.session?.userId) {
+              window.localStorage.setItem('cemcon_user_id', data.session.userId);
+            }
+          } catch {
+            // Ignore restricted storage errors
           }
         }
         setSession(data);
-      }
-      const saData = await safeFetchJson<any>('/api/sheets/service-account');
-      if (saData) {
-        setServiceAccountInfo(saData);
       }
     } catch (err) {
       console.error('Error fetching session:', err);
@@ -1348,31 +1371,33 @@ export default function App() {
                     </button>
                   </div>
                 ) : (
-                  <HRAdministrationModule
-                    key={`hr-suite-${session?.company?.company_id || 'default'}`}
-                    session={session}
-                    departments={departments}
-                    employees={employees}
-                    jobs={jobs}
-                    onEmployeeCreated={(createdEmp) => {
-                      if (createdEmp?.employee_id) {
-                        setEmployees((prev) => [createdEmp, ...prev.filter((e) => e.employee_id !== createdEmp.employee_id)]);
-                      }
-                    }}
-                    onEmployeeStatusUpdated={(updatedEmp) => {
-                      if (updatedEmp?.employee_id) {
-                        setEmployees((prev) => prev.map((e) => (e.employee_id === updatedEmp.employee_id ? updatedEmp : e)));
-                      }
-                    }}
-                    onRefreshEmployees={() => {
-                      fetch('/api/employees')
-                        .then((r) => r.json())
-                        .then((d) => setEmployees(d.data || []))
-                        .catch(console.error);
-                    }}
-                    triggerGoogleSheetsSync={triggerGoogleSheetsSync}
-                    sheetsSyncing={sheetsSyncing}
-                  />
+                  <Suspense fallback={<div className="p-8 text-xs text-slate-400">Loading HR & Administration Suite...</div>}>
+                    <HRAdministrationModule
+                      key={`hr-suite-${session?.company?.company_id || 'default'}`}
+                      session={session}
+                      departments={departments}
+                      employees={employees}
+                      jobs={jobs}
+                      onEmployeeCreated={(createdEmp) => {
+                        if (createdEmp?.employee_id) {
+                          setEmployees((prev) => [createdEmp, ...prev.filter((e) => e.employee_id !== createdEmp.employee_id)]);
+                        }
+                      }}
+                      onEmployeeStatusUpdated={(updatedEmp) => {
+                        if (updatedEmp?.employee_id) {
+                          setEmployees((prev) => prev.map((e) => (e.employee_id === updatedEmp.employee_id ? updatedEmp : e)));
+                        }
+                      }}
+                      onRefreshEmployees={() => {
+                        fetch('/api/employees')
+                          .then((r) => r.json())
+                          .then((d) => setEmployees(d.data || []))
+                          .catch(console.error);
+                      }}
+                      triggerGoogleSheetsSync={triggerGoogleSheetsSync}
+                      sheetsSyncing={sheetsSyncing}
+                    />
+                  </Suspense>
                 )
               )}
 
@@ -1970,39 +1995,43 @@ export default function App() {
 
           {/* VIEW 1B: WORKFORCE ATTENDANCE & 30-DAY MUSTER ROLL */}
           {activeTab === 'attendance' && (
-            <MonthlyAttendanceModule
-              key={`att-${session?.company?.company_id || 'default'}`}
-              session={session}
-              departments={departments}
-              employees={employees}
-              jobs={jobs}
-              onRefreshEmployees={() => {
-                fetch('/api/employees')
-                  .then((r) => r.json())
-                  .then((d) => setEmployees(d.data || []))
-                  .catch(console.error);
-              }}
-              triggerGoogleSheetsSync={triggerGoogleSheetsSync}
-              onOpenSalary={() => setActiveTab('salary')}
-            />
+            <Suspense fallback={<div className="p-8 text-xs text-slate-400">Loading Monthly Attendance Module...</div>}>
+              <MonthlyAttendanceModule
+                key={`att-${session?.company?.company_id || 'default'}`}
+                session={session}
+                departments={departments}
+                employees={employees}
+                jobs={jobs}
+                onRefreshEmployees={() => {
+                  fetch('/api/employees')
+                    .then((r) => r.json())
+                    .then((d) => setEmployees(d.data || []))
+                    .catch(console.error);
+                }}
+                triggerGoogleSheetsSync={triggerGoogleSheetsSync}
+                onOpenSalary={() => setActiveTab('salary')}
+              />
+            </Suspense>
           )}
 
           {/* VIEW 1C: SALARY & PAYROLL MODULE (AUTO-CALCULATED FROM ATTENDANCE) */}
           {activeTab === 'salary' && (
-            <SalaryModule
-              key={`sal-${session?.company?.company_id || 'default'}`}
-              session={session}
-              departments={departments}
-              employees={employees}
-              onRefreshEmployees={() => {
-                fetch('/api/employees')
-                  .then((r) => r.json())
-                  .then((d) => setEmployees(d.data || []))
-                  .catch(console.error);
-              }}
-              triggerGoogleSheetsSync={triggerGoogleSheetsSync}
-              onOpenAttendance={() => setActiveTab('attendance')}
-            />
+            <Suspense fallback={<div className="p-8 text-xs text-slate-400">Loading Salary & Payroll Module...</div>}>
+              <SalaryModule
+                key={`sal-${session?.company?.company_id || 'default'}`}
+                session={session}
+                departments={departments}
+                employees={employees}
+                onRefreshEmployees={() => {
+                  fetch('/api/employees')
+                    .then((r) => r.json())
+                    .then((d) => setEmployees(d.data || []))
+                    .catch(console.error);
+                }}
+                triggerGoogleSheetsSync={triggerGoogleSheetsSync}
+                onOpenAttendance={() => setActiveTab('attendance')}
+              />
+            </Suspense>
           )}
 
           {/* VIEW 2: JOB NUMBERING ENGINE */}
@@ -2234,46 +2263,52 @@ export default function App() {
 
           {/* VIEW 2B: JOB ESTIMATION SUITE (5-SECTION COSTING) */}
           {activeTab === 'estimations' && (
-            <JobEstimationModule
-              key={`est-${session?.company?.company_id || 'default'}`}
-              activeCompany={
-                CEMCON_COMPANIES.find(
-                  (c) => c.code === session?.company?.company_code || c.name === session?.company?.company_name
-                ) || CEMCON_COMPANIES[0]
-              }
-              tenantName={session?.tenant?.tenant_name || 'CEMCON Group Holding'}
-              userRole={session?.session?.roleCode}
-              onOpenJobNumbering={() => setActiveTab('jobs')}
-            />
+            <Suspense fallback={<div className="p-8 text-xs text-slate-400">Loading Job Estimation Suite...</div>}>
+              <JobEstimationModule
+                key={`est-${session?.company?.company_id || 'default'}`}
+                activeCompany={
+                  CEMCON_COMPANIES.find(
+                    (c) => c.code === session?.company?.company_code || c.name === session?.company?.company_name
+                  ) || CEMCON_COMPANIES[0]
+                }
+                tenantName={session?.tenant?.tenant_name || 'CEMCON Group Holding'}
+                userRole={session?.session?.roleCode}
+                onOpenJobNumbering={() => setActiveTab('jobs')}
+              />
+            </Suspense>
           )}
 
           {/* VIEW 3: ACCOUNTS & FINANCE DEPARTMENT (18-MODULE SUITE) */}
           {activeTab === 'accounting' && (
-            <FinanceModule
-              key={`fin-${session?.company?.company_id || 'default'}`}
-              activeCompany={
-                CEMCON_COMPANIES.find(
-                  (c) => c.code === session?.company?.company_code || c.name === session?.company?.company_name
-                ) || CEMCON_COMPANIES[0]
-              }
-              tenantName={session?.tenant?.tenant_name || 'CEMCON Group Holding'}
-              userRole={session?.session?.roleCode}
-              jobs={jobs}
-            />
+            <Suspense fallback={<div className="p-8 text-xs text-slate-400">Loading Accounts & Finance Suite...</div>}>
+              <FinanceModule
+                key={`fin-${session?.company?.company_id || 'default'}`}
+                activeCompany={
+                  CEMCON_COMPANIES.find(
+                    (c) => c.code === session?.company?.company_code || c.name === session?.company?.company_name
+                  ) || CEMCON_COMPANIES[0]
+                }
+                tenantName={session?.tenant?.tenant_name || 'CEMCON Group Holding'}
+                userRole={session?.session?.roleCode}
+                jobs={jobs}
+              />
+            </Suspense>
           )}
 
           {/* VIEW 3B: PROCUREMENT DEPARTMENT (8-OPERATION SUITE) */}
           {activeTab === 'procurement' && (
-            <ProcurementModule
-              key={`proc-${session?.company?.company_id || 'default'}`}
-              activeCompany={
-                CEMCON_COMPANIES.find(
-                  (c) => c.code === session?.company?.company_code || c.name === session?.company?.company_name
-                ) || CEMCON_COMPANIES[0]
-              }
-              tenantName={session?.tenant?.tenant_name || 'CEMCON Group Holding'}
-              userRole={session?.session?.roleCode}
-            />
+            <Suspense fallback={<div className="p-8 text-xs text-slate-400">Loading Procurement Suite...</div>}>
+              <ProcurementModule
+                key={`proc-${session?.company?.company_id || 'default'}`}
+                activeCompany={
+                  CEMCON_COMPANIES.find(
+                    (c) => c.code === session?.company?.company_code || c.name === session?.company?.company_name
+                  ) || CEMCON_COMPANIES[0]
+                }
+                tenantName={session?.tenant?.tenant_name || 'CEMCON Group Holding'}
+                userRole={session?.session?.roleCode}
+              />
+            </Suspense>
           )}
 
           {/* VIEW 4: INVENTORY & DYNAMIC STOCK LEDGER */}
@@ -3122,17 +3157,21 @@ export default function App() {
                 {[
                   {
                     key: 'GOOGLE_SHEET_ID',
-                    val: serviceAccountInfo?.sheetId || '1BJOlPhHwBtvuSvPVkK-0PVTspPSmlK1xK--bJWE3ueo',
+                    val: serviceAccountInfo?.sheetId && serviceAccountInfo.sheetId !== 'Not configured'
+                      ? serviceAccountInfo.sheetId
+                      : '<Your Google Spreadsheet ID from URL>',
                     desc: 'Your Google Spreadsheet document ID',
                   },
                   {
                     key: 'GOOGLE_CLIENT_EMAIL',
-                    val: serviceAccountInfo?.clientEmail || 'compenia-erp-cemcon@nth-drive-512014-j8.iam.gserviceaccount.com',
+                    val: serviceAccountInfo?.clientEmail && serviceAccountInfo.clientEmail !== 'Not configured'
+                      ? serviceAccountInfo.clientEmail
+                      : '<service-account@your-project.iam.gserviceaccount.com>',
                     desc: 'GCP Service Account Email with Editor access to the sheet',
                   },
                   {
                     key: 'GOOGLE_PROJECT_ID',
-                    val: serviceAccountInfo?.projectId || 'nth-drive-512014-j8',
+                    val: serviceAccountInfo?.projectId || '<your-gcp-project-id>',
                     desc: 'GCP Project ID',
                   },
                   {
@@ -3146,7 +3185,7 @@ export default function App() {
                       <span className="text-blue-400 font-bold">{item.key}</span>
                       <button
                         onClick={() => {
-                          navigator.clipboard.writeText(item.val);
+                          navigator.clipboard?.writeText(item.val).catch(() => {});
                           setCopiedKey(item.key);
                           setTimeout(() => setCopiedKey(null), 2000);
                         }}
@@ -3165,7 +3204,13 @@ export default function App() {
               <div className="p-3 rounded-lg bg-blue-950/40 border border-blue-500/30 text-slate-300 space-y-1 text-xs">
                 <div className="font-semibold text-blue-300">Important Google Sheet Permission:</div>
                 <p>
-                  Make sure you have shared your Google Sheet with <code className="text-white font-mono bg-slate-800 px-1 py-0.5 rounded">{serviceAccountInfo?.clientEmail || 'compenia-erp-cemcon@nth-drive-512014-j8.iam.gserviceaccount.com'}</code> and granted it <strong>Editor</strong> permission.
+                  Make sure you have shared your Google Sheet with{' '}
+                  <code className="text-white font-mono bg-slate-800 px-1 py-0.5 rounded">
+                    {serviceAccountInfo?.clientEmail && serviceAccountInfo.clientEmail !== 'Not configured'
+                      ? serviceAccountInfo.clientEmail
+                      : 'your GCP service account email'}
+                  </code>{' '}
+                  and granted it <strong>Editor</strong> permission.
                 </p>
               </div>
             </div>

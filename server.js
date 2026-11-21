@@ -1,11 +1,13 @@
 // server.ts
 import express from "express";
-import path from "path";
+import path2 from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
 // src/server/storage/storageAdapter.ts
 import crypto2 from "crypto";
+import fs from "fs";
+import path from "path";
 
 // src/server/schema/definitions.ts
 var ERP_TAB_SCHEMAS = {
@@ -176,9 +178,75 @@ var ERP_TAB_SCHEMAS = {
       { name: "trade", type: "string", required: false },
       { name: "shift_hours", type: "number", required: false },
       { name: "ot_hours", type: "number", required: false },
+      { name: "job_id", type: "uuid", required: false },
+      { name: "job_number", type: "string", required: false },
       { name: "check_in", type: "string", required: false },
       { name: "check_out", type: "string", required: false },
       { name: "notes", type: "string", required: false }
+    ]
+  },
+  SalaryStructures: {
+    tabName: "SalaryStructures",
+    description: "Employee compensation packages (Fix, Fix+OT, Per Day, Per Hour)",
+    category: "hr",
+    columns: [
+      { name: "structure_id", type: "uuid", required: true, primaryKey: true },
+      { name: "tenant_id", type: "uuid", required: true },
+      { name: "company_id", type: "uuid", required: true },
+      { name: "employee_id", type: "uuid", required: true },
+      { name: "employee_no", type: "string", required: true },
+      { name: "employee_name", type: "string", required: true },
+      { name: "designation", type: "string", required: false },
+      { name: "salary_type", type: "string", required: true, allowedValues: ["FIXED", "FIXED_PLUS_OT", "PER_DAY", "PER_HOUR"] },
+      { name: "base_rate", type: "decimal", required: true },
+      { name: "overtime_rate", type: "decimal", required: false },
+      { name: "housing_allowance", type: "decimal", required: false },
+      { name: "transport_allowance", type: "decimal", required: false },
+      { name: "other_allowances", type: "decimal", required: false },
+      { name: "currency", type: "string", required: true },
+      { name: "payment_method", type: "string", required: false, allowedValues: ["BANK_WPS", "CASH", "CHEQUE"] },
+      { name: "bank_name", type: "string", required: false },
+      { name: "iban", type: "string", required: false },
+      { name: "status", type: "string", required: true, allowedValues: ["ACTIVE", "INACTIVE"] },
+      { name: "notes", type: "string", required: false }
+    ]
+  },
+  MonthlyPayroll: {
+    tabName: "MonthlyPayroll",
+    description: "Monthly payroll runs generated directly from workforce attendance records",
+    category: "hr",
+    columns: [
+      { name: "payroll_id", type: "uuid", required: true, primaryKey: true },
+      { name: "tenant_id", type: "uuid", required: true },
+      { name: "company_id", type: "uuid", required: true },
+      { name: "payroll_month", type: "string", required: true },
+      { name: "month_days", type: "number", required: true },
+      { name: "employee_id", type: "uuid", required: true },
+      { name: "employee_no", type: "string", required: true },
+      { name: "employee_name", type: "string", required: true },
+      { name: "designation", type: "string", required: false },
+      { name: "trade", type: "string", required: false },
+      { name: "salary_type", type: "string", required: true, allowedValues: ["FIXED", "FIXED_PLUS_OT", "PER_DAY", "PER_HOUR"] },
+      { name: "present_days", type: "number", required: true },
+      { name: "vacation_days", type: "number", required: true },
+      { name: "absent_days", type: "number", required: true },
+      { name: "normal_shift_hours", type: "decimal", required: true },
+      { name: "overtime_hours", type: "decimal", required: true },
+      { name: "total_paid_hours", type: "decimal", required: true },
+      { name: "base_rate", type: "decimal", required: true },
+      { name: "overtime_rate", type: "decimal", required: false },
+      { name: "basic_salary_earned", type: "decimal", required: true },
+      { name: "overtime_pay", type: "decimal", required: true },
+      { name: "allowances_total", type: "decimal", required: true },
+      { name: "gross_salary", type: "decimal", required: true },
+      { name: "absence_deduction", type: "decimal", required: true },
+      { name: "other_deductions", type: "decimal", required: true },
+      { name: "net_salary", type: "decimal", required: true },
+      { name: "currency", type: "string", required: true },
+      { name: "status", type: "string", required: true, allowedValues: ["DRAFT", "GENERATED", "APPROVED", "PAID"] },
+      { name: "payment_date", type: "date-iso", required: false },
+      { name: "remarks", type: "string", required: false },
+      { name: "created_at", type: "date-iso", required: true }
     ]
   },
   LeaveRequests: {
@@ -840,6 +908,10 @@ var ERP_TAB_SCHEMAS = {
       { name: "total_credit", type: "decimal", required: true },
       { name: "is_balanced", type: "boolean", required: true },
       { name: "voucher_type", type: "string", required: false, allowedValues: ["JV", "PV", "RV", "EV", "AV"] },
+      { name: "job_id", type: "uuid", required: false },
+      { name: "job_number", type: "string", required: false },
+      { name: "supplier_id", type: "uuid", required: false },
+      { name: "supplier_name", type: "string", required: false },
       { name: "status", type: "string", required: true, allowedValues: ["DRAFT", "POSTED", "REVERSED"] },
       { name: "reversal_of_id", type: "uuid", required: false },
       { name: "created_by", type: "uuid", required: true },
@@ -857,7 +929,10 @@ var ERP_TAB_SCHEMAS = {
       { name: "debit", type: "decimal", required: true },
       { name: "credit", type: "decimal", required: true },
       { name: "line_memo", type: "string", required: false },
-      { name: "job_id", type: "uuid", required: false }
+      { name: "job_id", type: "uuid", required: false },
+      { name: "job_number", type: "string", required: false },
+      { name: "supplier_id", type: "uuid", required: false },
+      { name: "supplier_name", type: "string", required: false }
     ]
   },
   SalesInvoices: {
@@ -1235,6 +1310,19 @@ var GoogleSheetsServiceAccountClient = class {
     };
     this.refreshAuth();
   }
+  extractSheetId(raw) {
+    if (!raw) return null;
+    const cleaned = raw.trim().replace(/^["']|["']$/g, "").trim();
+    if (!cleaned) return null;
+    const urlMatch = cleaned.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    return urlMatch ? urlMatch[1] : cleaned;
+  }
+  normalizePrivateKey(raw) {
+    if (!raw) return null;
+    const cleaned = raw.trim().replace(/^["']|["']$/g, "").trim();
+    if (!cleaned) return null;
+    return cleaned.replace(/\\\\n/g, "\n").replace(/\\n/g, "\n").replace(/\r\n/g, "\n");
+  }
   refreshAuth() {
     const rawProjectId = process.env.GOOGLE_PROJECT_ID;
     const rawClientEmail = process.env.GOOGLE_CLIENT_EMAIL;
@@ -1242,8 +1330,8 @@ var GoogleSheetsServiceAccountClient = class {
     const rawSheetId = process.env.GOOGLE_SHEET_ID;
     const projectId = rawProjectId ? rawProjectId.trim().replace(/^["']|["']$/g, "").trim() : null;
     const clientEmail = rawClientEmail ? rawClientEmail.trim().replace(/^["']|["']$/g, "").trim() : null;
-    const sheetId = rawSheetId ? rawSheetId.trim().replace(/^["']|["']$/g, "").trim() : null;
-    let privateKey = rawPrivateKey ? rawPrivateKey.trim().replace(/^["']|["']$/g, "").trim() : null;
+    const sheetId = this.extractSheetId(rawSheetId);
+    const privateKey = this.normalizePrivateKey(rawPrivateKey);
     if (!clientEmail || !privateKey || !sheetId) {
       this.sheetsApi = null;
       this.authClient = null;
@@ -1260,7 +1348,6 @@ var GoogleSheetsServiceAccountClient = class {
       return false;
     }
     try {
-      privateKey = privateKey.replace(/\\n/g, "\n");
       this.authClient = new google.auth.JWT({
         email: clientEmail,
         key: privateKey,
@@ -1296,10 +1383,16 @@ var GoogleSheetsServiceAccountClient = class {
     }
   }
   getStatus() {
+    if (!this.initialized && process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID) {
+      this.refreshAuth();
+    }
     return { ...this.lastStatus };
   }
   isLiveReady() {
-    return this.initialized && this.sheetsApi !== null && !!process.env.GOOGLE_SHEET_ID;
+    if (!this.initialized && process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID) {
+      this.refreshAuth();
+    }
+    return this.initialized && this.sheetsApi !== null && !!this.extractSheetId(process.env.GOOGLE_SHEET_ID);
   }
   /**
    * Tests connection to Google Sheets API and verifies permissions on the target spreadsheet
@@ -1308,7 +1401,7 @@ var GoogleSheetsServiceAccountClient = class {
     if (!this.refreshAuth()) {
       return this.getStatus();
     }
-    const sheetId = (process.env.GOOGLE_SHEET_ID || "").trim().replace(/^["']|["']$/g, "");
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || "";
     try {
       const response = await this.sheetsApi.spreadsheets.get({
         spreadsheetId: sheetId
@@ -1362,25 +1455,89 @@ var GoogleSheetsServiceAccountClient = class {
     return val;
   }
   /**
-   * Append a row to a tab in Google Sheets
+   * Ensure a specific tab exists remotely with its header row (used if a new tab was added to schema)
    */
-  async appendRow(tabName, rowValues) {
+  async ensureTabExists(tabName, headers) {
     if (!this.isLiveReady()) return false;
-    const sheetId = (process.env.GOOGLE_SHEET_ID || "").trim().replace(/^["']|["']$/g, "");
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || "";
     try {
-      const formatted = rowValues.map((v) => this.formatCellValue(v));
+      const meta = await this.sheetsApi.spreadsheets.get({ spreadsheetId: sheetId });
+      const exists = (meta.data.sheets || []).some((s) => s.properties?.title === tabName);
+      if (!exists) {
+        await this.sheetsApi.spreadsheets.batchUpdate({
+          spreadsheetId: sheetId,
+          requestBody: {
+            requests: [
+              {
+                addSheet: {
+                  properties: {
+                    title: tabName,
+                    gridProperties: { frozenRowCount: 1 }
+                  }
+                }
+              }
+            ]
+          }
+        });
+        await this.sheetsApi.spreadsheets.values.update({
+          spreadsheetId: sheetId,
+          range: this.safeTabRange(tabName, "A1"),
+          valueInputOption: "USER_ENTERED",
+          requestBody: { values: [headers] }
+        });
+      }
+      return true;
+    } catch (err) {
+      console.warn(`[GoogleSheetsClient] Failed to ensure tab ${tabName}:`, err.message);
+      return false;
+    }
+  }
+  /**
+   * Append a single row to a tab in Google Sheets with INSERT_ROWS and auth retry
+   */
+  async appendRow(tabName, rowValues, headersForFallback) {
+    return this.appendRowsBatch(tabName, [rowValues], headersForFallback);
+  }
+  /**
+   * Append one or more rows in a single Google Sheets API call
+   */
+  async appendRowsBatch(tabName, rowsValues, headersForFallback) {
+    if (rowsValues.length === 0) return true;
+    if (!this.isLiveReady() && !this.refreshAuth()) return false;
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || "";
+    const formattedRows = rowsValues.map((row) => row.map((v) => this.formatCellValue(v)));
+    try {
       await this.sheetsApi.spreadsheets.values.append({
         spreadsheetId: sheetId,
         range: this.safeTabRange(tabName, "A1"),
         valueInputOption: "USER_ENTERED",
+        insertDataOption: "INSERT_ROWS",
         requestBody: {
-          values: [formatted]
+          values: formattedRows
         }
       });
       return true;
     } catch (err) {
-      console.warn(`[GoogleSheetsClient] Failed to append row to ${tabName}:`, err.message);
-      return false;
+      console.warn(`[GoogleSheetsClient] Initial append to ${tabName} failed (${err.message}), retrying...`);
+      try {
+        this.refreshAuth();
+        if (headersForFallback && err.message?.includes("Unable to parse range")) {
+          await this.ensureTabExists(tabName, headersForFallback);
+        }
+        await this.sheetsApi.spreadsheets.values.append({
+          spreadsheetId: sheetId,
+          range: this.safeTabRange(tabName, "A1"),
+          valueInputOption: "USER_ENTERED",
+          insertDataOption: "INSERT_ROWS",
+          requestBody: {
+            values: formattedRows
+          }
+        });
+        return true;
+      } catch (retryErr) {
+        console.error(`[GoogleSheetsClient] Retry append to ${tabName} failed:`, retryErr.message);
+        return false;
+      }
     }
   }
   /**
@@ -1388,7 +1545,7 @@ var GoogleSheetsServiceAccountClient = class {
    */
   async updateRow(tabName, rowIndex, rowValues) {
     if (!this.isLiveReady()) return false;
-    const sheetId = (process.env.GOOGLE_SHEET_ID || "").trim().replace(/^["']|["']$/g, "");
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || "";
     try {
       const formatted = rowValues.map((v) => this.formatCellValue(v));
       await this.sheetsApi.spreadsheets.values.update({
@@ -1410,7 +1567,7 @@ var GoogleSheetsServiceAccountClient = class {
    */
   async deleteRow(tabName, rowIndex) {
     if (!this.isLiveReady()) return false;
-    const sheetId = (process.env.GOOGLE_SHEET_ID || "").trim().replace(/^["']|["']$/g, "");
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || "";
     try {
       const meta = await this.sheetsApi.spreadsheets.get({ spreadsheetId: sheetId });
       const sheetObj = meta.data.sheets?.find((s) => s.properties?.title === tabName);
@@ -1443,7 +1600,7 @@ var GoogleSheetsServiceAccountClient = class {
    */
   async readTabValues(tabName) {
     if (!this.isLiveReady()) return null;
-    const sheetId = (process.env.GOOGLE_SHEET_ID || "").trim().replace(/^["']|["']$/g, "");
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || "";
     try {
       const res = await this.sheetsApi.spreadsheets.values.get({
         spreadsheetId: sheetId,
@@ -1461,7 +1618,7 @@ var GoogleSheetsServiceAccountClient = class {
   async loadAllRemoteTabsData() {
     const resultMap = /* @__PURE__ */ new Map();
     if (!this.isLiveReady()) return resultMap;
-    const sheetId = (process.env.GOOGLE_SHEET_ID || "").trim().replace(/^["']|["']$/g, "");
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || "";
     try {
       const tabNames = Object.keys(ERP_TAB_SCHEMAS);
       const chunkSize = 25;
@@ -1498,7 +1655,7 @@ var GoogleSheetsServiceAccountClient = class {
         message: "Google Service Account credentials or GOOGLE_SHEET_ID missing in environment."
       };
     }
-    const sheetId = (process.env.GOOGLE_SHEET_ID || "").trim().replace(/^["']|["']$/g, "");
+    const sheetId = this.extractSheetId(process.env.GOOGLE_SHEET_ID) || "";
     let createdTabs = 0;
     let syncedRows = 0;
     try {
@@ -1627,11 +1784,29 @@ var GoogleSheetsServiceAccountClient = class {
       };
     } catch (err) {
       console.error("[GoogleSheetsSync] Failed to initialize spreadsheet:", err.message);
+      let statusType = "ERROR";
+      let message = err.message;
+      if (err.code === 403 || err.message?.includes("permission") || err.message?.includes("IAM")) {
+        statusType = "PERMISSION_DENIED";
+        message = `Permission Denied: Please share spreadsheet (${sheetId}) with "${process.env.GOOGLE_CLIENT_EMAIL}" as "Editor".`;
+      } else if (err.code === 404 || err.message?.includes("not found")) {
+        statusType = "SPREADSHEET_NOT_FOUND";
+        message = `Spreadsheet Not Found: Please verify that GOOGLE_SHEET_ID "${sheetId}" exists.`;
+      }
+      this.lastStatus = {
+        isConfigured: true,
+        projectId: process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, "") || null,
+        clientEmail: process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, "") || null,
+        sheetId,
+        liveStatus: statusType,
+        statusMessage: message,
+        lastChecked: (/* @__PURE__ */ new Date()).toISOString()
+      };
       return {
         success: false,
         createdTabsCount: createdTabs,
         syncedRowsCount: syncedRows,
-        message: `Failed to bootstrap remote spreadsheet: ${err.message}`
+        message: `Failed to bootstrap remote spreadsheet: ${message}`
       };
     }
   }
@@ -1663,6 +1838,10 @@ var GoogleSheetsStorageAdapter = class {
     this.sheets = /* @__PURE__ */ new Map();
     this.mutex = new InMemoryMutex();
     this.initialized = false;
+    this.initPromise = null;
+    this.tabLastSyncedAt = /* @__PURE__ */ new Map();
+    this.pendingTabSyncs = /* @__PURE__ */ new Map();
+    this.snapshotPath = path.join(process.env.VERCEL ? "/tmp" : process.cwd(), ".compenia-erp-snapshot.json");
     this.initSchemas();
   }
   initSchemas() {
@@ -1673,22 +1852,143 @@ var GoogleSheetsStorageAdapter = class {
       });
     }
   }
-  async init() {
-    if (this.initialized) return;
-    this.seedInitialData();
-    this.initialized = true;
-    if (googleSheetsClient.isLiveReady()) {
-      try {
-        console.log("[StorageAdapter] Initializing live Google Sheets database...");
-        const testRes = await googleSheetsClient.testLiveConnection();
-        if (testRes.liveStatus === "CONNECTED") {
-          console.log("[StorageAdapter] Remote connection established. Synchronizing 60 production tabs...");
-          await googleSheetsClient.initializeRemoteSpreadsheet(this.sheets);
-        }
-      } catch (err) {
-        console.warn("[StorageAdapter] Google Sheets synchronization check:", err.message);
+  coerceRowBySchema(tabName, rec) {
+    const schema = ERP_TAB_SCHEMAS[tabName];
+    if (!schema) return rec;
+    const coerced = { ...rec };
+    for (const col of schema.columns) {
+      const val = coerced[col.name];
+      if (val === void 0 || val === null || val === "") continue;
+      if (col.type === "boolean" && typeof val !== "boolean") {
+        const s = String(val).trim().toLowerCase();
+        coerced[col.name] = s === "true" || s === "1" || s === "yes";
+      } else if ((col.type === "number" || col.type === "decimal") && typeof val !== "number") {
+        const parsed = Number(val);
+        if (!Number.isNaN(parsed)) coerced[col.name] = parsed;
       }
     }
+    return coerced;
+  }
+  coerceAllLoadedSheets() {
+    for (const [tabName, sheet] of this.sheets.entries()) {
+      sheet.rows = sheet.rows.map((r) => this.coerceRowBySchema(tabName, r));
+      this.tabLastSyncedAt.set(tabName, Date.now());
+    }
+  }
+  saveLocalSnapshot() {
+    try {
+      const dump = {};
+      for (const [tabName, sheet] of this.sheets.entries()) {
+        dump[tabName] = sheet.rows;
+      }
+      fs.writeFileSync(this.snapshotPath, JSON.stringify(dump), "utf8");
+    } catch (err) {
+      console.warn("[StorageAdapter] Failed to write local snapshot:", err.message);
+    }
+  }
+  loadLocalSnapshot() {
+    try {
+      if (!fs.existsSync(this.snapshotPath)) return false;
+      const raw = fs.readFileSync(this.snapshotPath, "utf8");
+      if (!raw) return false;
+      const dump = JSON.parse(raw);
+      for (const [tabName, rows] of Object.entries(dump)) {
+        const sheet = this.sheets.get(tabName);
+        if (sheet && Array.isArray(rows)) {
+          sheet.rows = rows.map((r) => this.coerceRowBySchema(tabName, r));
+        }
+      }
+      return true;
+    } catch (err) {
+      console.warn("[StorageAdapter] Failed to load local snapshot:", err.message);
+      return false;
+    }
+  }
+  async syncTabFromRemote(tabName, force = false) {
+    if (!googleSheetsClient.isLiveReady()) return;
+    const lastSync = this.tabLastSyncedAt.get(tabName) || 0;
+    if (!force && Date.now() - lastSync < 2500) return;
+    const existingPromise = this.pendingTabSyncs.get(tabName);
+    if (existingPromise) {
+      await existingPromise;
+      return;
+    }
+    const promise = (async () => {
+      try {
+        const remoteValues = await googleSheetsClient.readTabValues(tabName);
+        if (!remoteValues) return;
+        const schema = this.getSchema(tabName);
+        const headers = schema.columns.map((c) => c.name);
+        if (remoteValues.length >= 1) {
+          const remoteHeaders = (remoteValues[0] || []).map((h) => String(h || "").trim());
+          const records = [];
+          for (let r = 1; r < remoteValues.length; r++) {
+            const rowVals = remoteValues[r];
+            if (!rowVals || rowVals.length === 0 || rowVals.every((v) => v === "" || v === void 0)) continue;
+            const rec = {};
+            for (let c = 0; c < remoteHeaders.length; c++) {
+              const colName = remoteHeaders[c];
+              if (colName) {
+                let cellVal = rowVals[c] !== void 0 ? rowVals[c] : "";
+                if (typeof cellVal === "string" && cellVal.startsWith("'")) {
+                  cellVal = cellVal.slice(1);
+                }
+                rec[colName] = cellVal;
+              }
+            }
+            records.push(this.coerceRowBySchema(tabName, rec));
+          }
+          this.sheets.set(tabName, { headers, rows: records });
+          this.tabLastSyncedAt.set(tabName, Date.now());
+        }
+      } catch (err) {
+        console.warn(`[StorageAdapter] Live tab refresh failed for ${tabName}:`, err.message);
+      } finally {
+        this.pendingTabSyncs.delete(tabName);
+      }
+    })();
+    this.pendingTabSyncs.set(tabName, promise);
+    await promise;
+  }
+  async init() {
+    if (this.initialized) return;
+    if (this.initPromise) {
+      await this.initPromise;
+      return;
+    }
+    this.initPromise = (async () => {
+      this.seedInitialData();
+      googleSheetsClient.refreshAuth();
+      if (googleSheetsClient.isLiveReady()) {
+        try {
+          console.log("[StorageAdapter] Initializing live Google Sheets database...");
+          const syncRes = await googleSheetsClient.initializeRemoteSpreadsheet(this.sheets);
+          if (syncRes.success) {
+            this.coerceAllLoadedSheets();
+            await this.ensureMasterSeedsForAllCompanies(true);
+            this.saveLocalSnapshot();
+          } else {
+            this.loadLocalSnapshot();
+            await this.ensureMasterSeedsForAllCompanies(false);
+            this.saveLocalSnapshot();
+          }
+        } catch (err) {
+          console.warn("[StorageAdapter] Google Sheets synchronization check:", err.message);
+          this.loadLocalSnapshot();
+          await this.ensureMasterSeedsForAllCompanies(false);
+          this.saveLocalSnapshot();
+        }
+      } else {
+        const loaded = this.loadLocalSnapshot();
+        if (loaded) {
+          console.log("[StorageAdapter] Restored persisted state from local snapshot.");
+        }
+        await this.ensureMasterSeedsForAllCompanies(false);
+        this.saveLocalSnapshot();
+      }
+      this.initialized = true;
+    })();
+    await this.initPromise;
   }
   getSchema(tabName) {
     const schema = ERP_TAB_SCHEMAS[tabName];
@@ -1732,6 +2032,7 @@ var GoogleSheetsStorageAdapter = class {
     }
   }
   async readTab(tabName, query) {
+    await this.syncTabFromRemote(tabName, false);
     const sheet = this.sheets.get(tabName);
     if (!sheet) {
       throw new Error(`Tab "${tabName}" does not exist in spreadsheet database.`);
@@ -1769,7 +2070,7 @@ var GoogleSheetsStorageAdapter = class {
     }
     const total = filtered.length;
     const offset = query?.offset ?? 0;
-    const limit = query?.limit ?? 100;
+    const limit = query?.limit ?? 5e3;
     const paged = filtered.slice(offset, offset + limit);
     return {
       tabName,
@@ -1782,9 +2083,14 @@ var GoogleSheetsStorageAdapter = class {
   async getRowById(tabName, id, context) {
     const schema = this.getSchema(tabName);
     const pkCol = schema.columns.find((c) => c.primaryKey)?.name || "id";
-    const sheet = this.sheets.get(tabName);
+    let sheet = this.sheets.get(tabName);
     if (!sheet) return null;
-    const row = sheet.rows.find((r) => r[pkCol] === id);
+    let row = sheet.rows.find((r) => r[pkCol] === id);
+    if (!row && googleSheetsClient.isLiveReady()) {
+      await this.syncTabFromRemote(tabName, true);
+      sheet = this.sheets.get(tabName);
+      row = sheet?.rows.find((r) => r[pkCol] === id);
+    }
     if (!row) return null;
     if (context && row.tenant_id && row.tenant_id !== context.tenantId) {
       throw new Error(`Unauthorized: Cross-tenant access forbidden. Record belongs to another tenant.`);
@@ -1821,9 +2127,16 @@ var GoogleSheetsStorageAdapter = class {
     }
     this.validateRow(tabName, rowToSave, false);
     const sheet = this.sheets.get(tabName);
+    const hasCompanyIdCol = schema.columns.some((c) => c.name === "company_id");
     for (const col of schema.columns) {
-      if (col.unique && rowToSave[col.name] !== void 0) {
-        const duplicate = sheet.rows.find((r) => r[col.name] === rowToSave[col.name]);
+      if (col.unique && rowToSave[col.name] !== void 0 && rowToSave[col.name] !== null && rowToSave[col.name] !== "") {
+        const duplicate = sheet.rows.find((r) => {
+          if (r[col.name] !== rowToSave[col.name]) return false;
+          if (!col.primaryKey && hasCompanyIdCol && rowToSave.company_id && r.company_id) {
+            return r.company_id === rowToSave.company_id;
+          }
+          return true;
+        });
         if (duplicate) {
           throw new Error(
             `Unique constraint violated on tab [${tabName}]: Column "${col.name}" value "${rowToSave[col.name]}" already exists.`
@@ -1832,18 +2145,24 @@ var GoogleSheetsStorageAdapter = class {
       }
     }
     sheet.rows.push(rowToSave);
+    this.tabLastSyncedAt.set(tabName, Date.now());
     if (googleSheetsClient.isLiveReady()) {
       const headers = sheet.headers;
       const rowArr = headers.map((h) => rowToSave[h] !== void 0 && rowToSave[h] !== null ? rowToSave[h] : "");
-      try {
-        await googleSheetsClient.appendRow(tabName, rowArr);
-      } catch (err) {
-        console.warn(`[GoogleSheetsSync] Live append to ${tabName} failed:`, err.message);
+      const appended = await googleSheetsClient.appendRow(tabName, rowArr, headers);
+      if (!appended && tabName !== "AuditLogs") {
+        const idx = sheet.rows.lastIndexOf(rowToSave);
+        if (idx !== -1) sheet.rows.splice(idx, 1);
+        throw new Error(`Failed to save record permanently to Google Sheets tab [${tabName}]. Please verify service account Editor permissions.`);
       }
     }
+    this.saveLocalSnapshot();
     return rowToSave;
   }
   async updateRow(tabName, id, updates, context) {
+    if (googleSheetsClient.isLiveReady()) {
+      await this.syncTabFromRemote(tabName, true);
+    }
     const schema = this.getSchema(tabName);
     const pkCol = schema.columns.find((c) => c.primaryKey)?.name || "id";
     const sheet = this.sheets.get(tabName);
@@ -1861,18 +2180,23 @@ var GoogleSheetsStorageAdapter = class {
     }
     this.validateRow(tabName, merged, true);
     sheet.rows[index] = merged;
+    this.tabLastSyncedAt.set(tabName, Date.now());
     if (googleSheetsClient.isLiveReady()) {
       const headers = sheet.headers;
       const rowArr = headers.map((h) => merged[h] !== void 0 && merged[h] !== null ? merged[h] : "");
-      try {
-        await googleSheetsClient.updateRow(tabName, index + 2, rowArr);
-      } catch (err) {
-        console.warn(`[GoogleSheetsSync] Live update in ${tabName} at row ${index + 2} failed:`, err.message);
+      const ok = await googleSheetsClient.updateRow(tabName, index + 2, rowArr);
+      if (!ok) {
+        sheet.rows[index] = existing;
+        throw new Error(`Failed to update record permanently in Google Sheets tab [${tabName}].`);
       }
     }
+    this.saveLocalSnapshot();
     return merged;
   }
   async deleteRow(tabName, id, context) {
+    if (googleSheetsClient.isLiveReady()) {
+      await this.syncTabFromRemote(tabName, true);
+    }
     const schema = this.getSchema(tabName);
     const pkCol = schema.columns.find((c) => c.primaryKey)?.name || "id";
     const sheet = this.sheets.get(tabName);
@@ -1883,24 +2207,79 @@ var GoogleSheetsStorageAdapter = class {
       throw new Error(`Unauthorized: Cross-tenant deletion forbidden.`);
     }
     sheet.rows.splice(index, 1);
+    this.tabLastSyncedAt.set(tabName, Date.now());
     if (googleSheetsClient.isLiveReady()) {
-      try {
-        await googleSheetsClient.deleteRow(tabName, index + 2);
-      } catch (err) {
-        console.warn(`[GoogleSheetsSync] Live delete in ${tabName} at row ${index + 2} failed:`, err.message);
+      const ok = await googleSheetsClient.deleteRow(tabName, index + 2);
+      if (!ok) {
+        sheet.rows.splice(index, 0, existing);
+        throw new Error(`Failed to delete record from Google Sheets tab [${tabName}].`);
       }
     }
+    this.saveLocalSnapshot();
     return true;
   }
   async batchWrite(tabName, rows, context) {
+    if (rows.length === 0) return [];
     const release = await this.acquireLock(`batch_${tabName}`);
     try {
-      const results = [];
+      const schema = this.getSchema(tabName);
+      const pkCol = schema.columns.find((c) => c.primaryKey)?.name || "id";
+      const sheet = this.sheets.get(tabName);
+      const hasCompanyIdCol = schema.columns.some((c) => c.name === "company_id");
+      const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+      const preparedRows = [];
       for (const row of rows) {
-        const saved = await this.writeRow(tabName, row, context);
-        results.push(saved);
+        const rowToSave = { ...row };
+        if (!rowToSave[pkCol]) rowToSave[pkCol] = crypto2.randomUUID();
+        if (context) {
+          if (schema.columns.some((c) => c.name === "tenant_id") && !rowToSave.tenant_id) {
+            rowToSave.tenant_id = context.tenantId;
+          }
+          if (hasCompanyIdCol && !rowToSave.company_id && context.companyId) {
+            rowToSave.company_id = context.companyId;
+          }
+        }
+        if (context && rowToSave.tenant_id && rowToSave.tenant_id !== context.tenantId) {
+          throw new Error(`Security breach: Tenant ID mismatch. Cannot write record for another tenant.`);
+        }
+        if (schema.columns.some((c) => c.name === "created_at") && !rowToSave.created_at) {
+          rowToSave.created_at = nowIso;
+        }
+        if (schema.columns.some((c) => c.name === "updated_at") && !rowToSave.updated_at) {
+          rowToSave.updated_at = nowIso;
+        }
+        this.validateRow(tabName, rowToSave, false);
+        for (const col of schema.columns) {
+          if (col.unique && rowToSave[col.name] !== void 0 && rowToSave[col.name] !== null && rowToSave[col.name] !== "") {
+            const duplicate = [...sheet.rows, ...preparedRows].find((r) => {
+              if (r[col.name] !== rowToSave[col.name]) return false;
+              if (!col.primaryKey && hasCompanyIdCol && rowToSave.company_id && r.company_id) {
+                return r.company_id === rowToSave.company_id;
+              }
+              return true;
+            });
+            if (duplicate) {
+              throw new Error(
+                `Unique constraint violated on tab [${tabName}]: Column "${col.name}" value "${rowToSave[col.name]}" already exists.`
+              );
+            }
+          }
+        }
+        preparedRows.push(rowToSave);
       }
-      return results;
+      sheet.rows.push(...preparedRows);
+      this.tabLastSyncedAt.set(tabName, Date.now());
+      if (googleSheetsClient.isLiveReady()) {
+        const headers = sheet.headers;
+        const rowsArr = preparedRows.map((r) => headers.map((h) => r[h] !== void 0 && r[h] !== null ? r[h] : ""));
+        const ok = await googleSheetsClient.appendRowsBatch(tabName, rowsArr, headers);
+        if (!ok) {
+          sheet.rows.splice(sheet.rows.length - preparedRows.length, preparedRows.length);
+          throw new Error(`Failed to batch save records permanently to Google Sheets tab [${tabName}].`);
+        }
+      }
+      this.saveLocalSnapshot();
+      return preparedRows;
     } finally {
       release();
     }
@@ -1942,11 +2321,16 @@ var GoogleSheetsStorageAdapter = class {
       const liveStatus = await googleSheetsClient.testLiveConnection();
       if (liveStatus.liveStatus === "CONNECTED") {
         const bootstrapResult = await googleSheetsClient.initializeRemoteSpreadsheet(this.sheets);
+        await this.ensureMasterSeedsForAllCompanies(true);
+        let refreshedTotalRows = 0;
+        for (const sheet of this.sheets.values()) {
+          refreshedTotalRows += sheet.rows.length;
+        }
         return {
           success: bootstrapResult.success,
           timestamp: (/* @__PURE__ */ new Date()).toISOString(),
           syncedTabs: totalTabs,
-          totalRows,
+          totalRows: refreshedTotalRows,
           remoteSpreadsheetId: targetSheetId,
           message: bootstrapResult.message,
           details: {
@@ -2225,17 +2609,138 @@ var GoogleSheetsStorageAdapter = class {
       }
     );
     const ucSheet = this.sheets.get("UserCompanies");
-    ucSheet.rows.push(
-      { user_company_id: "uc-1", tenant_id: tenantId, user_id: adminUserId, company_id: compMechId, role_id: adminRoleId, is_default: true, created_at: "2026-01-01T00:00:00.000Z" },
-      { user_company_id: "uc-2", tenant_id: tenantId, user_id: adminUserId, company_id: compMeId, role_id: adminRoleId, is_default: false, created_at: "2026-01-01T00:00:00.000Z" },
-      { user_company_id: "uc-3", tenant_id: tenantId, user_id: adminUserId, company_id: compFzeId, role_id: adminRoleId, is_default: false, created_at: "2026-01-01T00:00:00.000Z" },
-      { user_company_id: "uc-4", tenant_id: tenantId, user_id: "user-acc-002", company_id: compMechId, role_id: accountantRoleId, is_default: true, created_at: "2026-01-01T00:00:00.000Z" },
-      { user_company_id: "uc-5", tenant_id: tenantId, user_id: "user-eng-003", company_id: compMechId, role_id: engineerRoleId, is_default: true, created_at: "2026-01-01T00:00:00.000Z" },
-      { user_company_id: "uc-6", tenant_id: tenantId, user_id: "user-sales-004", company_id: compMechId, role_id: salesRoleId, is_default: true, created_at: "2026-01-01T00:00:00.000Z" },
-      { user_company_id: "uc-7", tenant_id: tenantId, user_id: "user-hr-005", company_id: compMechId, role_id: hrRoleId, is_default: true, created_at: "2026-01-01T00:00:00.000Z" }
-    );
+    const userRoleMappings = [
+      { userId: adminUserId, roleId: adminRoleId, isDefault: true },
+      { userId: "user-acc-002", roleId: accountantRoleId, isDefault: true },
+      { userId: "user-eng-003", roleId: engineerRoleId, isDefault: true },
+      { userId: "user-sales-004", roleId: salesRoleId, isDefault: true },
+      { userId: "user-hr-005", roleId: hrRoleId, isDefault: true }
+    ];
+    let ucCounter = 1;
+    for (const ur of userRoleMappings) {
+      for (const comp of cemconCompanies) {
+        ucSheet.rows.push({
+          user_company_id: `uc-${ucCounter++}`,
+          tenant_id: tenantId,
+          user_id: ur.userId,
+          company_id: comp.id,
+          role_id: ur.roleId,
+          is_default: comp.id === compMechId ? ur.isDefault : false,
+          created_at: "2026-01-01T00:00:00.000Z"
+        });
+      }
+    }
+    const seedAccounts = this.getStandardCoaTemplate();
     const accountsSheet = this.sheets.get("Accounts");
-    const seedAccounts = [
+    const whSheet = this.sheets.get("Warehouses");
+    const bankSheet = this.sheets.get("BankAccounts");
+    const awSheet = this.sheets.get("ApprovalWorkflows");
+    for (const comp of cemconCompanies) {
+      const idPrefix = comp.id === compMechId ? "" : `${comp.prefix}-`;
+      for (const a of seedAccounts) {
+        accountsSheet.rows.push({
+          account_id: comp.id === compMechId ? a.id : `acc-${comp.prefix}-${a.code}`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          account_code: a.code,
+          account_name: a.name,
+          account_type: a.type,
+          normal_balance: a.normal,
+          is_active: true
+        });
+      }
+      whSheet.rows.push(
+        {
+          warehouse_id: `wh-${idPrefix}001`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          code: "WH-ALQUOZ",
+          name: "Al Quoz Central Heavy Fabrication Yard",
+          location: "Industrial Area 3, Dubai, UAE",
+          is_active: true
+        },
+        {
+          warehouse_id: `wh-${idPrefix}002`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          code: "WH-JEBELALI",
+          name: "Jebel Ali Free Zone Logistics Hub",
+          location: "JAFZA South, Dubai, UAE",
+          is_active: true
+        }
+      );
+      bankSheet.rows.push(
+        {
+          bank_account_id: `bank-${idPrefix}001`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          bank_name: "Emirates NBD",
+          account_number: comp.id === compMechId ? "030260001010123456789" : comp.id === compMeId ? "030260002020123456789" : "030260003030123456789",
+          iban: comp.id === compMechId ? "AE030260001010123456789" : comp.id === compMeId ? "AE030260002020123456789" : "AE030260003030123456789",
+          currency: "AED",
+          gl_account_id: comp.id === compMechId ? "acc-1010" : `acc-${comp.prefix}-1010`
+        },
+        {
+          bank_account_id: `bank-${idPrefix}002`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          bank_name: "Abu Dhabi Commercial Bank (ADCB)",
+          account_number: comp.id === compMechId ? "0230002020987654321" : comp.id === compMeId ? "0230002020987654322" : "0230002020987654323",
+          iban: comp.id === compMechId ? "AE550230002020987654321" : comp.id === compMeId ? "AE550230002020987654322" : "AE550230002020987654323",
+          currency: "AED",
+          gl_account_id: comp.id === compMechId ? "acc-1012" : `acc-${comp.prefix}-1012`
+        },
+        {
+          bank_account_id: `bank-${idPrefix}003`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          bank_name: "First Abu Dhabi Bank (FAB)",
+          account_number: comp.id === compMechId ? "0150003030456123789" : comp.id === compMeId ? "0150003030456123790" : "0150003030456123791",
+          iban: comp.id === compMechId ? "AE440150003030456123789" : comp.id === compMeId ? "AE440150003030456123790" : "AE440150003030456123791",
+          currency: "AED",
+          gl_account_id: comp.id === compMechId ? "acc-1015" : `acc-${comp.prefix}-1015`
+        },
+        {
+          bank_account_id: `bank-${idPrefix}004`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          bank_name: "Petty Cash Float (Yard Vault)",
+          account_number: `PETTY-CASH-${comp.prefix.toUpperCase()}-01`,
+          iban: "N/A (Physical Cash Vault)",
+          currency: "AED",
+          gl_account_id: comp.id === compMechId ? "acc-1018" : `acc-${comp.prefix}-1018`
+        }
+      );
+      awSheet.rows.push(
+        {
+          workflow_id: `wf-${idPrefix}po-01`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          module: "PURCHASE_ORDER",
+          threshold_amount: 1e4,
+          is_active: true
+        },
+        {
+          workflow_id: `wf-${idPrefix}pr-02`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          module: "PURCHASE_REQUEST",
+          threshold_amount: 1e4,
+          is_active: true
+        },
+        {
+          workflow_id: `wf-${idPrefix}leave-03`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          module: "LEAVE",
+          threshold_amount: 0,
+          is_active: true
+        }
+      );
+    }
+  }
+  getStandardCoaTemplate() {
+    return [
       { id: "acc-1010", code: "1010", name: "Cash and Bank - Emirates NBD Corporate (AED)", type: "ASSET", normal: "DEBIT" },
       { id: "acc-1012", code: "1012", name: "Cash and Bank - Abu Dhabi Commercial Bank Escrow (AED)", type: "ASSET", normal: "DEBIT" },
       { id: "acc-1015", code: "1015", name: "Cash and Bank - First Abu Dhabi Bank L/C Facility (AED)", type: "ASSET", normal: "DEBIT" },
@@ -2272,134 +2777,185 @@ var GoogleSheetsStorageAdapter = class {
       { id: "acc-6040", code: "6040", name: "Fleet Insurance, Diesel & Transport Road Tolls", type: "EXPENSE", normal: "DEBIT" },
       { id: "acc-7010", code: "7010", name: "UAE Corporate Tax Expense (9%)", type: "EXPENSE", normal: "DEBIT" }
     ];
-    for (const a of seedAccounts) {
-      accountsSheet.rows.push({
-        account_id: a.id,
-        tenant_id: tenantId,
-        company_id: compMechId,
-        account_code: a.code,
-        account_name: a.name,
-        account_type: a.type,
-        normal_balance: a.normal,
-        is_active: true
-      });
+  }
+  /**
+   * Ensures all 3 companies have complete master configuration rows even when hydrating
+   * from an existing Google Sheet that previously only seeded Company 1.
+   */
+  async ensureMasterSeedsForAllCompanies(pushRemote = false) {
+    const tenantId = "tenant-cemcon-001";
+    const companies = [
+      { id: "comp-cemcon-mech-01", prefix: "mech", code: "CEMCON-MECH", name: "Cemcon Mechanical Engineering LLC", legalType: "LLC", seqId: "seq-mech-01" },
+      { id: "comp-cemcon-me-02", prefix: "me", code: "CEMCON-ME", name: "CEMCON Middle East LLC", legalType: "LLC", seqId: "seq-me-02" },
+      { id: "comp-cemcon-fze-03", prefix: "fze", code: "CEMCON-FZE", name: "CEMCON FZE", legalType: "FZE", seqId: "seq-fze-03" }
+    ];
+    const pendingRemoteRows = /* @__PURE__ */ new Map();
+    const appendIfMissing = async (tabName, predicate, row) => {
+      const sheet = this.sheets.get(tabName);
+      if (!sheet) return;
+      if (sheet.rows.some(predicate)) return;
+      sheet.rows.push(row);
+      if (pushRemote && googleSheetsClient.isLiveReady()) {
+        const rowArr = sheet.headers.map((h) => row[h] !== void 0 && row[h] !== null ? row[h] : "");
+        const list = pendingRemoteRows.get(tabName) || [];
+        list.push(rowArr);
+        pendingRemoteRows.set(tabName, list);
+      }
+    };
+    const deptList = [
+      { name: "Accounts & Finance", code: "ACC-FIN" },
+      { name: "HR & Administration", code: "HR-ADM" },
+      { name: "Sales & Marketing", code: "SALES-MKT" },
+      { name: "Design & Estimation", code: "DSGN-EST" },
+      { name: "Procurement", code: "PROC" },
+      { name: "Store & Logistics", code: "STR-LOG" },
+      { name: "Production/Workshop", code: "PROD-WKP" },
+      { name: "QA/QC ( Quality Assurance & Quality Control)", code: "QA-QC" },
+      { name: "HSE( Health , Safety & Environment)", code: "HSE" }
+    ];
+    const coaTemplate = this.getStandardCoaTemplate();
+    for (const comp of companies) {
+      const idPrefix = comp.id === "comp-cemcon-mech-01" ? "" : `${comp.prefix}-`;
+      await appendIfMissing(
+        "Companies",
+        (r) => r.company_id === comp.id,
+        {
+          company_id: comp.id,
+          tenant_id: tenantId,
+          company_code: comp.code,
+          company_name: comp.name,
+          legal_type: comp.legalType,
+          currency: "AED",
+          country: "United Arab Emirates",
+          status: "ACTIVE",
+          created_at: "2026-01-01T00:00:00.000Z",
+          updated_at: "2026-01-01T00:00:00.000Z"
+        }
+      );
+      await appendIfMissing(
+        "JobSequences",
+        (r) => r.company_id === comp.id,
+        {
+          sequence_id: comp.seqId,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          prefix: "",
+          current_sequence: 0,
+          pad_digits: 4,
+          updated_at: "2026-01-01T00:00:00.000Z"
+        }
+      );
+      for (let i = 0; i < deptList.length; i++) {
+        const d = deptList[i];
+        await appendIfMissing(
+          "Departments",
+          (r) => r.company_id === comp.id && r.code === d.code,
+          {
+            department_id: `dept-${comp.prefix}-${String(i + 1).padStart(2, "0")}`,
+            tenant_id: tenantId,
+            company_id: comp.id,
+            name: d.name,
+            code: d.code,
+            status: "ACTIVE"
+          }
+        );
+      }
+      for (const a of coaTemplate) {
+        await appendIfMissing(
+          "Accounts",
+          (r) => r.company_id === comp.id && r.account_code === a.code,
+          {
+            account_id: comp.id === "comp-cemcon-mech-01" ? a.id : `acc-${comp.prefix}-${a.code}`,
+            tenant_id: tenantId,
+            company_id: comp.id,
+            account_code: a.code,
+            account_name: a.name,
+            account_type: a.type,
+            normal_balance: a.normal,
+            is_active: true
+          }
+        );
+      }
+      await appendIfMissing(
+        "Warehouses",
+        (r) => r.company_id === comp.id && r.code === "WH-ALQUOZ",
+        {
+          warehouse_id: `wh-${idPrefix}001`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          code: "WH-ALQUOZ",
+          name: "Al Quoz Central Heavy Fabrication Yard",
+          location: "Industrial Area 3, Dubai, UAE",
+          is_active: true
+        }
+      );
+      await appendIfMissing(
+        "Warehouses",
+        (r) => r.company_id === comp.id && r.code === "WH-JEBELALI",
+        {
+          warehouse_id: `wh-${idPrefix}002`,
+          tenant_id: tenantId,
+          company_id: comp.id,
+          code: "WH-JEBELALI",
+          name: "Jebel Ali Free Zone Logistics Hub",
+          location: "JAFZA South, Dubai, UAE",
+          is_active: true
+        }
+      );
+      const bankSeeds = [
+        { suffix: "001", name: "Emirates NBD", glCode: "1010", acct: `03026000${comp.id === "comp-cemcon-mech-01" ? "1010" : comp.id === "comp-cemcon-me-02" ? "2020" : "3030"}123456789`, iban: `AE03026000${comp.id === "comp-cemcon-mech-01" ? "1010" : comp.id === "comp-cemcon-me-02" ? "2020" : "3030"}123456789` },
+        { suffix: "002", name: "Abu Dhabi Commercial Bank (ADCB)", glCode: "1012", acct: `023000202098765432${comp.prefix === "mech" ? "1" : comp.prefix === "me" ? "2" : "3"}`, iban: `AE55023000202098765432${comp.prefix === "mech" ? "1" : comp.prefix === "me" ? "2" : "3"}` },
+        { suffix: "003", name: "First Abu Dhabi Bank (FAB)", glCode: "1015", acct: `015000303045612378${comp.prefix === "mech" ? "9" : comp.prefix === "me" ? "0" : "1"}`, iban: `AE44015000303045612378${comp.prefix === "mech" ? "9" : comp.prefix === "me" ? "0" : "1"}` },
+        { suffix: "004", name: "Petty Cash Float (Yard Vault)", glCode: "1018", acct: `PETTY-CASH-${comp.prefix.toUpperCase()}-01`, iban: "N/A (Physical Cash Vault)" }
+      ];
+      for (const b of bankSeeds) {
+        const glRow = this.sheets.get("Accounts")?.rows.find((r) => r.company_id === comp.id && r.account_code === b.glCode);
+        await appendIfMissing(
+          "BankAccounts",
+          (r) => r.company_id === comp.id && r.bank_name === b.name,
+          {
+            bank_account_id: `bank-${idPrefix}${b.suffix}`,
+            tenant_id: tenantId,
+            company_id: comp.id,
+            bank_name: b.name,
+            account_number: b.acct,
+            iban: b.iban,
+            currency: "AED",
+            gl_account_id: glRow?.account_id || (comp.id === "comp-cemcon-mech-01" ? `acc-${b.glCode}` : `acc-${comp.prefix}-${b.glCode}`)
+          }
+        );
+      }
+      const wfSeeds = [
+        { id: `wf-${idPrefix}po-01`, module: "PURCHASE_ORDER", threshold: 1e4 },
+        { id: `wf-${idPrefix}pr-02`, module: "PURCHASE_REQUEST", threshold: 1e4 },
+        { id: `wf-${idPrefix}leave-03`, module: "LEAVE", threshold: 0 }
+      ];
+      for (const w of wfSeeds) {
+        await appendIfMissing(
+          "ApprovalWorkflows",
+          (r) => r.company_id === comp.id && r.module === w.module,
+          {
+            workflow_id: w.id,
+            tenant_id: tenantId,
+            company_id: comp.id,
+            module: w.module,
+            threshold_amount: w.threshold,
+            is_active: true
+          }
+        );
+      }
     }
-    const whSheet = this.sheets.get("Warehouses");
-    whSheet.rows.push(
-      {
-        warehouse_id: "wh-001",
-        tenant_id: tenantId,
-        company_id: compMechId,
-        code: "WH-ALQUOZ",
-        name: "Al Quoz Central Heavy Fabrication Yard",
-        location: "Industrial Area 3, Dubai, UAE",
-        is_active: true
-      },
-      {
-        warehouse_id: "wh-002",
-        tenant_id: tenantId,
-        company_id: compMechId,
-        code: "WH-JEBELALI",
-        name: "Jebel Ali Free Zone Logistics Hub",
-        location: "JAFZA South, Dubai, UAE",
-        is_active: true
+    if (pushRemote && pendingRemoteRows.size > 0 && googleSheetsClient.isLiveReady()) {
+      for (const [tabName, rowsArr] of pendingRemoteRows.entries()) {
+        const sheet = this.sheets.get(tabName);
+        if (!sheet) continue;
+        try {
+          await googleSheetsClient.appendRowsBatch(tabName, rowsArr, sheet.headers);
+        } catch (err) {
+          console.warn(`[StorageAdapter] Remote batch backfill failed for ${tabName}:`, err.message);
+        }
       }
-    );
-    const bankSheet = this.sheets.get("BankAccounts");
-    bankSheet.rows.push(
-      {
-        bank_account_id: "bank-001",
-        tenant_id: tenantId,
-        company_id: compMechId,
-        bank_name: "Emirates NBD",
-        account_number: "030260001010123456789",
-        iban: "AE030260001010123456789",
-        currency: "AED",
-        gl_account_id: "acc-1010"
-      },
-      {
-        bank_account_id: "bank-002",
-        tenant_id: tenantId,
-        company_id: compMechId,
-        bank_name: "Abu Dhabi Commercial Bank (ADCB)",
-        account_number: "0230002020987654321",
-        iban: "AE550230002020987654321",
-        currency: "AED",
-        gl_account_id: "acc-1012"
-      },
-      {
-        bank_account_id: "bank-003",
-        tenant_id: tenantId,
-        company_id: compMechId,
-        bank_name: "First Abu Dhabi Bank (FAB)",
-        account_number: "0150003030456123789",
-        iban: "AE440150003030456123789",
-        currency: "AED",
-        gl_account_id: "acc-1015"
-      },
-      {
-        bank_account_id: "bank-004",
-        tenant_id: tenantId,
-        company_id: compMechId,
-        bank_name: "Petty Cash Float (Yard Vault)",
-        account_number: "PETTY-CASH-YARD-01",
-        iban: "N/A (Physical Cash Vault Al Quoz)",
-        currency: "AED",
-        gl_account_id: "acc-1018"
-      }
-    );
-    const quoteSheet = this.sheets.get("Quotations");
-    const salesInvSheet = this.sheets.get("SalesInvoices");
-    const purInvSheet = this.sheets.get("PurchaseInvoices");
-    const dnSheet = this.sheets.get("DeliveryNotes");
-    const recSheet = this.sheets.get("Receipts");
-    const paySheet = this.sheets.get("Payments");
-    const prSheet = this.sheets.get("PurchaseRequests");
-    const rfqSheet = this.sheets.get("RFQs");
-    const sqSheet = this.sheets.get("SupplierQuotations");
-    const poSheet = this.sheets.get("PurchaseOrders");
-    const grnSheet = this.sheets.get("GoodsReceipts");
-    const awSheet = this.sheets.get("ApprovalWorkflows");
-    awSheet.rows.push(
-      {
-        workflow_id: "wf-po-01",
-        tenant_id: tenantId,
-        company_id: compMechId,
-        module: "PURCHASE_ORDER",
-        threshold_amount: 1e4,
-        is_active: true
-      },
-      {
-        workflow_id: "wf-pr-02",
-        tenant_id: tenantId,
-        company_id: compMechId,
-        module: "PURCHASE_REQUEST",
-        threshold_amount: 1e4,
-        is_active: true
-      },
-      {
-        workflow_id: "wf-leave-03",
-        tenant_id: tenantId,
-        company_id: compMechId,
-        module: "LEAVE",
-        threshold_amount: 0,
-        is_active: true
-      }
-    );
-    const arSheet = this.sheets.get("ApprovalRequests");
-    const docSheet = this.sheets.get("Documents");
-    const pdcSheet = this.sheets.get("PDCRegister");
-    const empDocSheet = this.sheets.get("EmployeeDocuments");
-    const insSheet = this.sheets.get("InsurancePolicies");
-    const vehSheet = this.sheets.get("Vehicles");
-    const fineSheet = this.sheets.get("VehicleFines");
-    const maintSheet = this.sheets.get("VehicleMaintenance");
-    const recruitSheet = this.sheets.get("RecruitmentRequests");
-    const candSheet = this.sheets.get("Candidates");
-    const clrSheet = this.sheets.get("ClearanceForms");
-    const attSheet = this.sheets.get("Attendance");
-    const tsSheet = this.sheets.get("Timesheets");
-    const otSheet = this.sheets.get("OvertimeRequests");
+    }
   }
 };
 var globalStorageAdapter = new GoogleSheetsStorageAdapter();
@@ -2782,6 +3338,17 @@ var AccountingRepository = class extends BaseRepository {
       });
       const vType = entry.voucherType || "JV";
       const nextJvNum = `${vType}-${(/* @__PURE__ */ new Date()).getFullYear()}-${String(existingJournals.total + 1).padStart(4, "0")}`;
+      const headerJobId = entry.jobId || entry.job_id || null;
+      const headerJobNumber = entry.jobNumber || entry.job_number || null;
+      const headerSupplierId = entry.supplierId || entry.supplier_id || null;
+      let headerSupplierName = entry.supplierName || entry.supplier_name || null;
+      if (headerSupplierId && !headerSupplierName) {
+        try {
+          const suppRow = await this.storage.getRowById("Suppliers", headerSupplierId, context);
+          if (suppRow?.name) headerSupplierName = suppRow.name;
+        } catch {
+        }
+      }
       const journalId = crypto3.randomUUID();
       const savedJournal = await this.storage.writeRow(
         "JournalEntries",
@@ -2797,6 +3364,10 @@ var AccountingRepository = class extends BaseRepository {
           total_credit: totalCredit,
           is_balanced: true,
           voucher_type: vType,
+          job_id: headerJobId,
+          job_number: headerJobNumber,
+          supplier_id: headerSupplierId,
+          supplier_name: headerSupplierName,
           status: "POSTED",
           reversal_of_id: null,
           created_by: context.userId
@@ -2806,11 +3377,14 @@ var AccountingRepository = class extends BaseRepository {
       const lineRows = entry.lines.map((l) => ({
         line_id: crypto3.randomUUID(),
         journal_id: journalId,
-        account_id: l.accountId,
+        account_id: l.accountId || l.account_id,
         debit: parseFloat(String(l.debit || 0)),
         credit: parseFloat(String(l.credit || 0)),
-        line_memo: l.lineMemo || entry.memo,
-        job_id: l.jobId || null
+        line_memo: l.lineMemo || l.line_memo || entry.memo,
+        job_id: l.jobId || l.job_id || headerJobId,
+        job_number: l.jobNumber || l.job_number || headerJobNumber,
+        supplier_id: l.supplierId || l.supplier_id || headerSupplierId,
+        supplier_name: l.supplierName || l.supplier_name || headerSupplierName
       }));
       await this.storage.batchWrite("JournalLines", lineRows, context);
       this.logAudit(context, "POST_JOURNAL", "JournalEntries", journalId, null, savedJournal);
@@ -3257,6 +3831,10 @@ var AccountingRepository = class extends BaseRepository {
           voucherType: j.voucher_type || "JV",
           date: j.entry_date,
           memo: l.line_memo || j.memo,
+          jobId: l.job_id || j.job_id || null,
+          jobNumber: l.job_number || j.job_number || null,
+          supplierId: l.supplier_id || j.supplier_id || null,
+          supplierName: l.supplier_name || j.supplier_name || null,
           debit: parseFloat(String(l.debit || 0)),
           credit: parseFloat(String(l.credit || 0))
         };
@@ -3365,16 +3943,19 @@ var AccountingRepository = class extends BaseRepository {
   // 14. Cash Flow Reporting
   async getCashFlow(context) {
     this.assertContext(context);
-    const pnl = await this.getProfitAndLoss(context);
+    const tb = await this.getTrialBalance(context);
     const receipts = await this.listReceipts(context);
     const payments = await this.listPayments(context);
     const totalReceipts = receipts.data.reduce((s, r) => s + parseFloat(String(r.amount || 0)), 0);
     const totalPayments = payments.data.reduce((s, p) => s + parseFloat(String(p.amount || 0)), 0);
+    const capitalExpenditure = tb.report.filter((a) => a.accountCode.startsWith("15") && a.accountCode !== "1590").reduce((s, a) => s + Math.max(0, Number(a.totalDebit || 0)), 0);
+    const capitalInjections = tb.report.filter((a) => a.accountCode === "3010" || a.accountCode === "2510").reduce((s, a) => s + Math.max(0, Number(a.totalCredit || 0)), 0);
+    const debtRepayments = tb.report.filter((a) => a.accountCode === "2510").reduce((s, a) => s + Math.max(0, Number(a.totalDebit || 0)), 0);
     const operatingCashFlow = totalReceipts - totalPayments;
-    const investingCashFlow = -75e3;
-    const financingCashFlow = 0;
+    const investingCashFlow = -capitalExpenditure;
+    const financingCashFlow = capitalInjections - debtRepayments;
     const netCashChange = operatingCashFlow + investingCashFlow + financingCashFlow;
-    const beginningCash = 1e6;
+    const beginningCash = 0;
     const endingCash = beginningCash + netCashChange;
     return {
       operating: {
@@ -3383,12 +3964,12 @@ var AccountingRepository = class extends BaseRepository {
         netOperating: operatingCashFlow
       },
       investing: {
-        capitalExpenditure: 75e3,
+        capitalExpenditure,
         netInvesting: investingCashFlow
       },
       financing: {
-        capitalInjections: 0,
-        debtRepayments: 0,
+        capitalInjections,
+        debtRepayments,
         netFinancing: financingCashFlow
       },
       netCashChange,
@@ -4233,6 +4814,8 @@ var HRRepository = class extends BaseRepository {
     const code = rawStatus.startsWith("P") ? "P" : rawStatus.startsWith("A") ? "A" : "V";
     const shiftHours = code === "P" ? 8 : code === "V" ? 8 : 0;
     const otHours = Math.max(0, parseFloat(String(data.ot_hours ?? data.otHours ?? 0)));
+    const incomingJobId = data.job_id !== void 0 ? data.job_id : data.jobId;
+    const incomingJobNo = data.job_number !== void 0 ? data.job_number : data.jobNumber;
     const existing = await this.storage.readTab("Attendance", {
       tenantId: context.tenantId,
       companyId: context.companyId,
@@ -4252,7 +4835,9 @@ var HRRepository = class extends BaseRepository {
           trade: data.trade !== void 0 ? data.trade : rec.trade || "",
           shift_hours: shiftHours,
           ot_hours: otHours,
-          notes: data.notes || ""
+          job_id: incomingJobId !== void 0 ? incomingJobId : rec.job_id || "",
+          job_number: incomingJobNo !== void 0 ? incomingJobNo : rec.job_number || "",
+          notes: data.notes !== void 0 ? data.notes : rec.notes || ""
         },
         context
       );
@@ -4271,6 +4856,8 @@ var HRRepository = class extends BaseRepository {
           trade: data.trade || "",
           shift_hours: shiftHours,
           ot_hours: otHours,
+          job_id: incomingJobId || "",
+          job_number: incomingJobNo || "",
           notes: data.notes || ""
         },
         context
@@ -4469,6 +5056,325 @@ var JobEstimationRepository = class extends BaseRepository {
     };
   }
 };
+var PayrollRepository = class extends BaseRepository {
+  // Salary Structures (Compensation Packages)
+  async listSalaryStructures(context, query) {
+    this.assertContext(context);
+    return this.storage.readTab("SalaryStructures", {
+      ...query,
+      tenantId: context.tenantId,
+      companyId: context.companyId,
+      orderBy: { column: "employee_no", ascending: true }
+    });
+  }
+  async getSalaryStructureByEmployee(employeeId, context) {
+    this.assertContext(context);
+    const res = await this.storage.readTab("SalaryStructures", {
+      tenantId: context.tenantId,
+      companyId: context.companyId,
+      where: { employee_id: employeeId }
+    });
+    return res.data && res.data.length > 0 ? res.data[0] : null;
+  }
+  async upsertSalaryStructure(data, context) {
+    this.assertContext(context);
+    const employeeId = data.employee_id;
+    if (!employeeId) {
+      throw new Error("employee_id is required for salary structure");
+    }
+    const existing = await this.getSalaryStructureByEmployee(employeeId, context);
+    const baseRate = parseFloat(String(data.base_rate ?? 0));
+    const overtimeRate = parseFloat(String(data.overtime_rate ?? 0));
+    const housing = parseFloat(String(data.housing_allowance ?? 0));
+    const transport = parseFloat(String(data.transport_allowance ?? 0));
+    const otherAllowances = parseFloat(String(data.other_allowances ?? 0));
+    const payload = {
+      tenant_id: context.tenantId,
+      company_id: context.companyId,
+      employee_id: employeeId,
+      employee_no: data.employee_no || "",
+      employee_name: data.employee_name || "",
+      designation: data.designation || "",
+      salary_type: data.salary_type || "FIXED",
+      // 'FIXED', 'FIXED_PLUS_OT', 'PER_DAY', 'PER_HOUR'
+      base_rate: baseRate,
+      overtime_rate: overtimeRate,
+      housing_allowance: housing,
+      transport_allowance: transport,
+      other_allowances: otherAllowances,
+      currency: data.currency || "AED",
+      payment_method: data.payment_method || "BANK_WPS",
+      bank_name: data.bank_name || "",
+      iban: data.iban || "",
+      status: data.status || "ACTIVE",
+      notes: data.notes || ""
+    };
+    if (existing) {
+      const updated = await this.storage.updateRow(
+        "SalaryStructures",
+        existing.structure_id,
+        payload,
+        context
+      );
+      this.logAudit(context, "UPDATE_SALARY_STRUCTURE", "SalaryStructures", existing.structure_id, existing, updated);
+      return updated;
+    } else {
+      const created = await this.storage.writeRow(
+        "SalaryStructures",
+        {
+          structure_id: crypto3.randomUUID(),
+          ...payload
+        },
+        context
+      );
+      this.logAudit(context, "CREATE_SALARY_STRUCTURE", "SalaryStructures", created.structure_id, null, created);
+      return created;
+    }
+  }
+  async deleteSalaryStructure(structureId, context) {
+    this.assertContext(context);
+    const existing = await this.storage.getRowById("SalaryStructures", structureId, context);
+    if (!existing) throw new Error(`Salary structure ${structureId} not found`);
+    const success = await this.storage.deleteRow("SalaryStructures", structureId, context);
+    this.logAudit(context, "DELETE_SALARY_STRUCTURE", "SalaryStructures", structureId, existing, null);
+    return success;
+  }
+  // Monthly Payroll Runs
+  async listPayroll(month, context, query) {
+    if (context) this.assertContext(context);
+    const where = {};
+    if (month) {
+      where.payroll_month = month;
+    }
+    return this.storage.readTab("MonthlyPayroll", {
+      ...query,
+      tenantId: context?.tenantId,
+      companyId: context?.companyId,
+      where,
+      orderBy: { column: "employee_no", ascending: true }
+    });
+  }
+  /**
+   * Generates or updates monthly payroll directly from attendance records
+   * - month: e.g. "2026-11"
+   * - month_days: 30 or 31 (user-selectable)
+   */
+  async generateMonthlyPayroll(params, context) {
+    this.assertContext(context);
+    const month = params.month;
+    const monthDays = Number(params.month_days) === 31 ? 31 : 30;
+    const empRes = await this.storage.readTab("Employees", {
+      tenantId: context.tenantId,
+      companyId: context.companyId
+    });
+    const employees = empRes.data || [];
+    const structRes = await this.storage.readTab("SalaryStructures", {
+      tenantId: context.tenantId,
+      companyId: context.companyId
+    });
+    const structures = structRes.data || [];
+    const structMap = /* @__PURE__ */ new Map();
+    for (const s of structures) {
+      structMap.set(s.employee_id, s);
+    }
+    const attRes = await this.storage.readTab("Attendance", {
+      tenantId: context.tenantId,
+      companyId: context.companyId
+    });
+    const allAttendance = attRes.data || [];
+    const monthAttendance = allAttendance.filter(
+      (a) => a.date && typeof a.date === "string" && a.date.startsWith(month)
+    );
+    const empAttMap = /* @__PURE__ */ new Map();
+    for (const a of monthAttendance) {
+      if (!empAttMap.has(a.employee_id)) {
+        empAttMap.set(a.employee_id, []);
+      }
+      empAttMap.get(a.employee_id).push(a);
+    }
+    const existingPayrollRes = await this.storage.readTab("MonthlyPayroll", {
+      tenantId: context.tenantId,
+      companyId: context.companyId,
+      where: { payroll_month: month }
+    });
+    const existingMap = /* @__PURE__ */ new Map();
+    for (const p of existingPayrollRes.data || []) {
+      existingMap.set(p.employee_id, p);
+    }
+    const generatedRecords = [];
+    for (const emp of employees) {
+      const records = empAttMap.get(emp.employee_id) || [];
+      if (emp.status === "INACTIVE" && records.length === 0) {
+        continue;
+      }
+      let presentDays = 0;
+      let vacationDays = 0;
+      let absentDays = 0;
+      let normalShiftHours = 0;
+      let otHours = 0;
+      let empTrade = emp.designation || "";
+      for (const rec of records) {
+        const rawStatus = (rec.status || rec.code || "P").toUpperCase();
+        const ot = Number(rec.ot_hours || 0);
+        otHours += ot;
+        if (rec.trade) empTrade = rec.trade;
+        if (rawStatus === "P" || rawStatus === "PRESENT") {
+          presentDays += 1;
+          normalShiftHours += Number(rec.shift_hours || 8);
+        } else if (rawStatus === "V" || rawStatus === "VACATION") {
+          vacationDays += 1;
+          normalShiftHours += Number(rec.shift_hours || 8);
+        } else if (rawStatus === "A" || rawStatus === "ABSENT") {
+          absentDays += 1;
+        }
+      }
+      const totalPaidHours = normalShiftHours + otHours;
+      const struct = structMap.get(emp.employee_id) || null;
+      const salaryType = struct?.salary_type || (emp.designation?.toLowerCase().includes("welder") || emp.designation?.toLowerCase().includes("fabricator") ? "FIXED_PLUS_OT" : "FIXED");
+      const baseRate = Number(struct?.base_rate || 0);
+      let overtimeRate = Number(struct?.overtime_rate || 0);
+      const housing = Number(struct?.housing_allowance || 0);
+      const transport = Number(struct?.transport_allowance || 0);
+      const otherAllow = Number(struct?.other_allowances || 0);
+      const allowancesTotal = housing + transport + otherAllow;
+      let basicSalaryEarned = 0;
+      let overtimePay = 0;
+      let absenceDeduction = 0;
+      const existingRecord = existingMap.get(emp.employee_id);
+      const otherDeductions = existingRecord ? Number(existingRecord.other_deductions || 0) : 0;
+      if (salaryType === "FIXED") {
+        const dailyRate = monthDays > 0 ? baseRate / monthDays : 0;
+        absenceDeduction = Math.round(absentDays * dailyRate * 100) / 100;
+        basicSalaryEarned = Math.max(0, Math.round((baseRate - absenceDeduction) * 100) / 100);
+        overtimePay = 0;
+      } else if (salaryType === "FIXED_PLUS_OT") {
+        const dailyRate = monthDays > 0 ? baseRate / monthDays : 0;
+        const hourlyBase = dailyRate / 8;
+        if (overtimeRate <= 0) {
+          overtimeRate = Math.round(hourlyBase * 1.25 * 100) / 100;
+        }
+        absenceDeduction = Math.round(absentDays * dailyRate * 100) / 100;
+        basicSalaryEarned = Math.max(0, Math.round((baseRate - absenceDeduction) * 100) / 100);
+        overtimePay = Math.round(otHours * overtimeRate * 100) / 100;
+      } else if (salaryType === "PER_DAY") {
+        if (overtimeRate <= 0) {
+          overtimeRate = Math.round(baseRate / 8 * 1.25 * 100) / 100;
+        }
+        basicSalaryEarned = Math.round((presentDays + vacationDays) * baseRate * 100) / 100;
+        overtimePay = Math.round(otHours * overtimeRate * 100) / 100;
+        absenceDeduction = 0;
+      } else if (salaryType === "PER_HOUR") {
+        if (overtimeRate <= 0) {
+          overtimeRate = Math.round(baseRate * 1.25 * 100) / 100;
+        }
+        basicSalaryEarned = Math.round(normalShiftHours * baseRate * 100) / 100;
+        overtimePay = Math.round(otHours * overtimeRate * 100) / 100;
+        absenceDeduction = 0;
+      }
+      const grossSalary = Math.round((basicSalaryEarned + overtimePay + allowancesTotal) * 100) / 100;
+      const netSalary = Math.max(0, Math.round((grossSalary - otherDeductions) * 100) / 100);
+      const payrollRow = {
+        tenant_id: context.tenantId,
+        company_id: context.companyId,
+        payroll_month: month,
+        month_days: monthDays,
+        employee_id: emp.employee_id,
+        employee_no: emp.employee_no,
+        employee_name: emp.full_name,
+        designation: emp.designation,
+        trade: empTrade,
+        salary_type: salaryType,
+        present_days: presentDays,
+        vacation_days: vacationDays,
+        absent_days: absentDays,
+        normal_shift_hours: normalShiftHours,
+        overtime_hours: otHours,
+        total_paid_hours: totalPaidHours,
+        base_rate: baseRate,
+        overtime_rate: overtimeRate,
+        basic_salary_earned: basicSalaryEarned,
+        overtime_pay: overtimePay,
+        allowances_total: allowancesTotal,
+        gross_salary: grossSalary,
+        absence_deduction: absenceDeduction,
+        other_deductions: otherDeductions,
+        net_salary: netSalary,
+        currency: struct?.currency || "AED",
+        status: existingRecord?.status || "GENERATED",
+        payment_date: existingRecord?.payment_date || null,
+        remarks: existingRecord?.remarks || `Auto-calculated from ${month} attendance`,
+        created_at: existingRecord?.created_at || (/* @__PURE__ */ new Date()).toISOString()
+      };
+      if (existingRecord) {
+        const updated = await this.storage.updateRow(
+          "MonthlyPayroll",
+          existingRecord.payroll_id,
+          payrollRow,
+          context
+        );
+        generatedRecords.push(updated);
+      } else {
+        const created = await this.storage.writeRow(
+          "MonthlyPayroll",
+          {
+            payroll_id: crypto3.randomUUID(),
+            ...payrollRow
+          },
+          context
+        );
+        generatedRecords.push(created);
+      }
+    }
+    this.logAudit(context, "GENERATE_MONTHLY_PAYROLL", "MonthlyPayroll", `PAYROLL-${month}`, null, {
+      month,
+      monthDays,
+      count: generatedRecords.length
+    });
+    return generatedRecords;
+  }
+  async updatePayrollItem(id, updates, context) {
+    this.assertContext(context);
+    const existing = await this.storage.getRowById("MonthlyPayroll", id, context);
+    if (!existing) {
+      throw new Error(`Payroll record not found: ${id}`);
+    }
+    const basicEarned = updates.basic_salary_earned !== void 0 ? Number(updates.basic_salary_earned) : Number(existing.basic_salary_earned || 0);
+    const overtimePay = updates.overtime_pay !== void 0 ? Number(updates.overtime_pay) : Number(existing.overtime_pay || 0);
+    const allowances = updates.allowances_total !== void 0 ? Number(updates.allowances_total) : Number(existing.allowances_total || 0);
+    const deductions = updates.other_deductions !== void 0 ? Number(updates.other_deductions) : Number(existing.other_deductions || 0);
+    const grossSalary = Math.round((basicEarned + overtimePay + allowances) * 100) / 100;
+    const netSalary = Math.max(0, Math.round((grossSalary - deductions) * 100) / 100);
+    const updated = await this.storage.updateRow(
+      "MonthlyPayroll",
+      id,
+      {
+        ...updates,
+        basic_salary_earned: basicEarned,
+        overtime_pay: overtimePay,
+        allowances_total: allowances,
+        gross_salary: grossSalary,
+        other_deductions: deductions,
+        net_salary: netSalary
+      },
+      context
+    );
+    this.logAudit(context, "UPDATE_PAYROLL_ITEM", "MonthlyPayroll", id, existing, updated);
+    return updated;
+  }
+  async batchUpdatePayrollStatus(ids, status, paymentDate, context) {
+    if (context) this.assertContext(context);
+    const results = [];
+    for (const id of ids) {
+      const updates = { status };
+      if (paymentDate) {
+        updates.payment_date = paymentDate;
+      }
+      const updated = await this.storage.updateRow("MonthlyPayroll", id, updates, context);
+      results.push(updated);
+    }
+    return results;
+  }
+};
 
 // src/server/migration/postgresMigration.ts
 var PostgresMigrationEngine = class {
@@ -4642,7 +5548,7 @@ runMigration();
 // server.ts
 dotenv.config();
 var __filename = fileURLToPath(import.meta.url);
-var __dirname = path.dirname(__filename);
+var __dirname = path2.dirname(__filename);
 var app = express();
 var port = 3e3;
 app.use(express.json());
@@ -4655,7 +5561,25 @@ app.use((req, _res, next) => {
   }
   next();
 });
-await globalStorageAdapter.init();
+app.use("/api", (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  next();
+});
+try {
+  await globalStorageAdapter.init();
+} catch (err) {
+  console.error("[Server] Non-fatal initial storage hydration error:", err?.message || err);
+}
+app.use("/api", async (_req, _res, next) => {
+  try {
+    await globalStorageAdapter.init();
+  } catch (err) {
+    console.error("[Server] Storage init check failed:", err?.message || err);
+  }
+  next();
+});
 var tenantRepo = new TenantRepository(globalStorageAdapter);
 var companyRepo = new CompanyRepository(globalStorageAdapter);
 var departmentRepo = new DepartmentRepository(globalStorageAdapter);
@@ -4674,6 +5598,7 @@ var documentRepo = new DocumentRepository(globalStorageAdapter);
 var approvalRepo = new ApprovalRepository(globalStorageAdapter);
 var notificationRepo = new NotificationRepository(globalStorageAdapter);
 var auditRepo = new AuditRepository(globalStorageAdapter);
+var payrollRepo = new PayrollRepository(globalStorageAdapter);
 var migrationEngine = new PostgresMigrationEngine(globalStorageAdapter);
 var ENTERPRISE_USER_ROLES = {
   "user-admin-001": {
@@ -4717,6 +5642,26 @@ var ENTERPRISE_USER_ROLES = {
     isTenantAdmin: false
   }
 };
+var USER_PROFILES = {
+  "user-admin-001": { email: "admin@cemcon.ae", name: "System Administrator" },
+  "user-acc-002": { email: "finance@cemcon.ae", name: "Accounts & Finance Officer" },
+  "user-eng-003": { email: "engineering@cemcon.ae", name: "Senior Project Engineer" },
+  "user-sales-004": { email: "shoaib@cemcon.ae", name: "Muhammad Shoaib" },
+  "user-hr-005": { email: "adeel@cemcon.ae", name: "Muhammad Adeel" }
+};
+function parseCookies(req) {
+  const raw = req.headers.cookie || "";
+  const out = {};
+  raw.split(";").forEach((part) => {
+    const idx = part.indexOf("=");
+    if (idx > 0) {
+      const k = decodeURIComponent(part.slice(0, idx).trim());
+      const v = decodeURIComponent(part.slice(idx + 1).trim());
+      out[k] = v;
+    }
+  });
+  return out;
+}
 var activeSession = {
   tenantId: "tenant-cemcon-001",
   companyId: "comp-cemcon-mech-01",
@@ -4731,14 +5676,28 @@ var activeSession = {
   isTenantAdmin: true
 };
 function getSecurityContext(req) {
+  const cookies = parseCookies(req);
   const reqTenant = req.headers["x-tenant-id"];
-  const reqCompany = req.headers["x-company-id"];
+  const reqCompany = req.headers["x-company-id"] || cookies["cemcon_company_id"];
+  const reqUser = req.headers["x-user-id"] || cookies["cemcon_user_id"];
   if (reqTenant && reqTenant !== activeSession.tenantId) {
     throw new Error("Forbidden: Cross-tenant access attempt detected and blocked.");
   }
+  const resolvedUserId = reqUser || activeSession.userId;
+  const roleConfig = ENTERPRISE_USER_ROLES[resolvedUserId];
+  const profile = USER_PROFILES[resolvedUserId];
   return {
-    ...activeSession,
-    companyId: reqCompany || activeSession.companyId
+    tenantId: activeSession.tenantId,
+    companyId: reqCompany || activeSession.companyId,
+    userId: resolvedUserId,
+    userEmail: profile?.email || activeSession.userEmail,
+    userName: profile?.name || activeSession.userName,
+    roleCode: roleConfig?.roleCode || activeSession.roleCode,
+    roleTitle: roleConfig?.roleTitle || activeSession.roleTitle,
+    departmentScope: roleConfig?.departmentScope || activeSession.departmentScope,
+    allowedDepartmentCodes: roleConfig?.allowedDepartmentCodes || activeSession.allowedDepartmentCodes,
+    permissions: roleConfig?.permissions || activeSession.permissions,
+    isTenantAdmin: roleConfig !== void 0 ? roleConfig.isTenantAdmin : activeSession.isTenantAdmin
   };
 }
 app.get("/api/auth/session", async (req, res) => {
@@ -4764,11 +5723,13 @@ app.get("/api/auth/session", async (req, res) => {
 app.post("/api/auth/switch-company", async (req, res) => {
   try {
     const { companyId } = req.body;
-    const company = await companyRepo.getCompany(companyId, activeSession);
+    const context = getSecurityContext(req);
+    const company = await companyRepo.getCompany(companyId, context);
     if (!company) {
       return res.status(404).json({ error: "Company not found in this tenant." });
     }
     activeSession.companyId = companyId;
+    res.setHeader("Set-Cookie", `cemcon_company_id=${encodeURIComponent(companyId)}; Path=/; SameSite=Lax; Max-Age=2592000`);
     res.json({ success: true, activeCompany: company });
   } catch (err) {
     res.status(403).json({ error: err.message });
@@ -4777,7 +5738,8 @@ app.post("/api/auth/switch-company", async (req, res) => {
 app.post("/api/auth/switch-user", async (req, res) => {
   try {
     const { userId } = req.body;
-    const user = await userRepo.getUser(userId, activeSession);
+    const context = getSecurityContext(req);
+    const user = await userRepo.getUser(userId, context);
     if (!user) {
       return res.status(404).json({ error: "User not found in tenant." });
     }
@@ -4791,7 +5753,7 @@ app.post("/api/auth/switch-user", async (req, res) => {
     };
     activeSession = {
       tenantId: user.tenant_id,
-      companyId: activeSession.companyId || "comp-cemcon-mech-01",
+      companyId: context.companyId || activeSession.companyId || "comp-cemcon-mech-01",
       userId: user.user_id,
       userEmail: user.email,
       userName: user.full_name,
@@ -4802,6 +5764,7 @@ app.post("/api/auth/switch-user", async (req, res) => {
       permissions: roleConfig.permissions,
       isTenantAdmin: roleConfig.isTenantAdmin
     };
+    res.setHeader("Set-Cookie", `cemcon_user_id=${encodeURIComponent(user.user_id)}; Path=/; SameSite=Lax; Max-Age=2592000`);
     res.json({ success: true, activeUser: user, session: activeSession });
   } catch (err) {
     res.status(403).json({ error: err.message });
@@ -5286,6 +6249,81 @@ app.post("/api/hr/attendance/bulk", async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
+app.get("/api/payroll/structures", async (req, res) => {
+  try {
+    const context = getSecurityContext(req);
+    const result = await payrollRepo.listSalaryStructures(context);
+    res.json(result);
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+app.post("/api/payroll/structures", async (req, res) => {
+  try {
+    const context = getSecurityContext(req);
+    const result = await payrollRepo.upsertSalaryStructure(req.body, context);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.delete("/api/payroll/structures/:id", async (req, res) => {
+  try {
+    const context = getSecurityContext(req);
+    await payrollRepo.deleteSalaryStructure(req.params.id, context);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.get("/api/payroll/records", async (req, res) => {
+  try {
+    const context = getSecurityContext(req);
+    const month = req.query.month || void 0;
+    const result = await payrollRepo.listPayroll(month, context);
+    res.json(result);
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+app.post("/api/payroll/generate", async (req, res) => {
+  try {
+    const context = getSecurityContext(req);
+    const { month, month_days } = req.body;
+    if (!month) {
+      return res.status(400).json({ error: "month (YYYY-MM) is required" });
+    }
+    const result = await payrollRepo.generateMonthlyPayroll(
+      { month, month_days: Number(month_days) || 30 },
+      context
+    );
+    res.json({ success: true, count: result.length, data: result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.patch("/api/payroll/records/:id", async (req, res) => {
+  try {
+    const context = getSecurityContext(req);
+    const result = await payrollRepo.updatePayrollItem(req.params.id, req.body, context);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.post("/api/payroll/batch-status", async (req, res) => {
+  try {
+    const context = getSecurityContext(req);
+    const { ids, status, payment_date } = req.body;
+    if (!Array.isArray(ids)) {
+      return res.status(400).json({ error: "ids must be an array" });
+    }
+    const results = await payrollRepo.batchUpdatePayrollStatus(ids, status, payment_date, context);
+    res.json({ success: true, count: results.length, data: results });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 app.get("/api/hr/timesheets", async (req, res) => {
   try {
     const context = getSecurityContext(req);
@@ -5345,6 +6383,33 @@ app.get("/api/customers", async (req, res) => {
     res.status(403).json({ error: err.message });
   }
 });
+app.post("/api/customers", async (req, res) => {
+  try {
+    const context = getSecurityContext(req);
+    const { name, customer_code, email, phone, trn_vat_number, contact_person, billing_address, credit_limit } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: "Customer name is required." });
+    }
+    const generatedCode = `CUST-${(/* @__PURE__ */ new Date()).getFullYear()}-${Math.floor(1e3 + Math.random() * 9e3)}`;
+    const created = await customerRepo.createCustomer(
+      {
+        name: String(name).trim(),
+        customer_code: customer_code ? String(customer_code).trim().toUpperCase() : generatedCode,
+        email: email ? String(email).trim() : "client@cemcon.ae",
+        phone: phone ? String(phone).trim() : "",
+        trn_vat_number: trn_vat_number ? String(trn_vat_number).trim() : "",
+        contact_person: contact_person ? String(contact_person).trim() : "",
+        billing_address: billing_address ? String(billing_address).trim() : "",
+        credit_limit: credit_limit !== void 0 ? Number(credit_limit) : 5e5,
+        status: "ACTIVE"
+      },
+      context
+    );
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 app.get("/api/suppliers", async (req, res) => {
   try {
     const context = getSecurityContext(req);
@@ -5352,6 +6417,42 @@ app.get("/api/suppliers", async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(403).json({ error: err.message });
+  }
+});
+app.post("/api/suppliers", async (req, res) => {
+  try {
+    const context = getSecurityContext(req);
+    const {
+      name,
+      supplier_code,
+      email,
+      phone,
+      trn_vat_number,
+      contact_person,
+      address,
+      payment_terms_days
+    } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: "Vendor / Supplier name is required." });
+    }
+    const generatedCode = `SUPP-${(/* @__PURE__ */ new Date()).getFullYear()}-${Math.floor(1e3 + Math.random() * 9e3)}`;
+    const created = await supplierRepo.createSupplier(
+      {
+        name: String(name).trim(),
+        supplier_code: supplier_code ? String(supplier_code).trim().toUpperCase() : generatedCode,
+        email: email && String(email).trim() ? String(email).trim() : "vendor@cemcon.ae",
+        phone: phone ? String(phone).trim() : "",
+        trn_vat_number: trn_vat_number ? String(trn_vat_number).trim() : "",
+        contact_person: contact_person ? String(contact_person).trim() : "",
+        address: address ? String(address).trim() : "",
+        payment_terms_days: payment_terms_days !== void 0 ? Number(payment_terms_days) : 30,
+        status: "ACTIVE"
+      },
+      context
+    );
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 app.get("/api/jobs", async (req, res) => {
@@ -5521,7 +6622,21 @@ app.get("/api/accounting/journals/:id", async (req, res) => {
 app.post("/api/accounting/post-journal", async (req, res) => {
   try {
     const context = getSecurityContext(req);
-    const { idempotencyKey, entryDate, memo, lines } = req.body;
+    const {
+      idempotencyKey,
+      entryDate,
+      memo,
+      lines,
+      voucherType,
+      jobId,
+      jobNumber,
+      job_id,
+      job_number,
+      supplierId,
+      supplierName,
+      supplier_id,
+      supplier_name
+    } = req.body;
     if (!idempotencyKey || !entryDate || !memo || !lines) {
       return res.status(400).json({ error: "idempotencyKey, entryDate, memo, and lines are required." });
     }
@@ -5530,7 +6645,12 @@ app.post("/api/accounting/post-journal", async (req, res) => {
         idempotencyKey,
         entryDate,
         memo,
-        lines
+        lines,
+        voucherType,
+        jobId: jobId || job_id,
+        jobNumber: jobNumber || job_number,
+        supplierId: supplierId || supplier_id,
+        supplierName: supplierName || supplier_name
       },
       context
     );
@@ -6050,10 +7170,11 @@ app.get("/api/sheets/tabs", (req, res) => {
   });
   res.json(result);
 });
-app.get("/api/sheets/tab/:tabName", (req, res) => {
+app.get("/api/sheets/tab/:tabName", async (req, res) => {
   try {
     const { tabName } = req.params;
     const schema = globalStorageAdapter.getSchema(tabName);
+    await globalStorageAdapter.readTab(tabName);
     const rawData = globalStorageAdapter.getRawSheetData(tabName);
     res.json({
       tabName,
@@ -6274,9 +7395,9 @@ app.post("/api/diagnostics/run-tests", async (_req, res) => {
 });
 if (!process.env.VERCEL) {
   if (process.env.NODE_ENV === "production") {
-    app.use(express.static(path.resolve(__dirname, "dist")));
+    app.use(express.static(path2.resolve(__dirname, "dist")));
     app.get("*", (_req, res) => {
-      res.sendFile(path.resolve(__dirname, "dist", "index.html"));
+      res.sendFile(path2.resolve(__dirname, "dist", "index.html"));
     });
   } else {
     const { createServer } = await import("vite");
