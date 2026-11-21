@@ -941,8 +941,8 @@ export default function App() {
           </div>
           <div className="text-[10px] text-slate-400 leading-tight">
             {serviceAccountInfo?.liveStatus === 'CONNECTED'
-              ? '69 Enterprise Tabs • Persistent Sheets Sync'
-              : 'Click to configure Vercel Environment'}
+              ? `${serviceAccountInfo?.availableRemoteTabs?.length || 71} Enterprise Tabs • Persistent Sheets Sync`
+              : 'Click to inspect connection status'}
           </div>
         </div>
       </aside>
@@ -955,15 +955,26 @@ export default function App() {
             <div className="flex items-center gap-2.5">
               <AlertTriangle className="h-4 w-4 text-amber-400 flex-shrink-0" />
               <span>
-                <strong>Google Sheets Live Database Not Connected on Vercel:</strong> New records are stored in temporary serverless memory and will disappear when the instance restarts. Configure your Google Service Account in Vercel to save to Google Sheets permanently.
+                <strong>Google Sheets Status ({serviceAccountInfo.liveStatus}):</strong>{' '}
+                {serviceAccountInfo.statusMessage ||
+                  'Google Service Account credentials are not active on this server. Configure environment variables and Redeploy on Vercel.'}
               </span>
             </div>
-            <button
-              onClick={() => setShowVercelEnvGuide(true)}
-              className="px-3 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[11px] whitespace-nowrap self-start sm:self-auto transition"
-            >
-              Vercel Setup Guide
-            </button>
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              <button
+                onClick={testServiceAccountConnection}
+                disabled={testingConnection}
+                className="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white font-semibold text-[11px] whitespace-nowrap border border-slate-700 transition"
+              >
+                {testingConnection ? 'Testing...' : 'Test Connection'}
+              </button>
+              <button
+                onClick={() => setShowVercelEnvGuide(true)}
+                className="px-3 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[11px] whitespace-nowrap transition"
+              >
+                Setup & Diagnostics
+              </button>
+            </div>
           </div>
         )}
 
@@ -3132,25 +3143,65 @@ export default function App() {
               </button>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-200 leading-relaxed">
-              <strong>Why did your created data disappear?</strong>
-              <p className="mt-1">
-                On Vercel, serverless containers automatically restart after idle periods. Because Vercel does not read your local <code className="bg-slate-800 px-1 py-0.5 rounded text-white">.env</code> file, it cannot authenticate with Google Sheets without environment variables. Once you add the 4 variables below in your Vercel Project Settings, every employee, job order, and voucher is saved permanently to your live Google Sheet and will never disappear.
-              </p>
+            <div className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-200 leading-relaxed space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <strong>Live Server Diagnostic: {serviceAccountInfo?.liveStatus || 'UNKNOWN'}</strong>
+                <button
+                  type="button"
+                  onClick={testServiceAccountConnection}
+                  disabled={testingConnection}
+                  className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-semibold"
+                >
+                  {testingConnection ? 'Testing...' : 'Re-Test Connection'}
+                </button>
+              </div>
+              <p>{serviceAccountInfo?.statusMessage || 'Unable to verify Google Sheets credentials on this deployment.'}</p>
             </div>
+
+            {/* Live Environment Variable Presence Check */}
+            {serviceAccountInfo?.envCheck && (
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <div className="text-[11px] font-bold text-white uppercase tracking-wider">
+                  Server Environment Detection (Currently Running Deployment)
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] font-mono">
+                  {[
+                    { name: 'GOOGLE_SHEET_ID', ok: serviceAccountInfo.envCheck.hasSheetId },
+                    { name: 'GOOGLE_CLIENT_EMAIL', ok: serviceAccountInfo.envCheck.hasClientEmail },
+                    { name: 'GOOGLE_PRIVATE_KEY', ok: serviceAccountInfo.envCheck.hasPrivateKey && serviceAccountInfo.envCheck.privateKeyFormatValid },
+                    { name: 'GOOGLE_PROJECT_ID', ok: serviceAccountInfo.envCheck.hasProjectId },
+                    { name: 'SERVICE_ACCOUNT_JSON', ok: serviceAccountInfo.envCheck.hasServiceAccountJson },
+                  ].map((v) => (
+                    <div
+                      key={v.name}
+                      className={`px-2.5 py-1.5 rounded border flex items-center justify-between ${
+                        v.ok
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                          : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                      }`}
+                    >
+                      <span className="truncate">{v.name}</span>
+                      <span className="font-bold ml-1">{v.ok ? 'OK' : 'MISSING'}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  If you added variables in Vercel and any required item still shows <strong>MISSING</strong>, check that you selected <strong>Production + Preview + Development</strong> in Vercel Settings → Environment Variables, then trigger a fresh <strong>Redeploy</strong> (and ensure this deployment has the latest code pushed from AI Studio to GitHub).
+                </p>
+              </div>
+            )}
 
             <div className="space-y-3 text-xs">
               <div className="font-bold text-white uppercase tracking-wider text-[11px]">
-                Steps to Configure on Vercel:
+                Recommended Vercel Environment Variables:
               </div>
               <ol className="list-decimal list-inside space-y-2 text-slate-300">
                 <li>
-                  Open your <a href="https://vercel.com/dashboard" target="_blank" rel="noreferrer" className="text-blue-400 underline font-semibold">Vercel Dashboard</a> and select your <strong>cemcon-erp-system</strong> project.
+                  Open your <a href="https://vercel.com/dashboard" target="_blank" rel="noreferrer" className="text-blue-400 underline font-semibold">Vercel Dashboard</a> → Project → <strong>Settings</strong> → <strong>Environment Variables</strong>.
                 </li>
                 <li>
-                  Navigate to <strong>Settings</strong> → <strong>Environment Variables</strong>.
+                  Add <strong>GOOGLE_SHEET_ID</strong> plus either the individual fields below <em>or</em> a single <strong>GOOGLE_SERVICE_ACCOUNT_JSON</strong> containing your downloaded GCP service account JSON (which avoids private-key newline formatting issues):
                 </li>
-                <li>Add the following 4 variables (select Production, Preview, and Development):</li>
               </ol>
 
               <div className="space-y-2 pt-1 font-mono text-[11px]">
@@ -3159,25 +3210,25 @@ export default function App() {
                     key: 'GOOGLE_SHEET_ID',
                     val: serviceAccountInfo?.sheetId && serviceAccountInfo.sheetId !== 'Not configured'
                       ? serviceAccountInfo.sheetId
-                      : '<Your Google Spreadsheet ID from URL>',
-                    desc: 'Your Google Spreadsheet document ID',
+                      : '<Your Google Spreadsheet ID or full Google Sheets URL>',
+                    desc: 'Your Google Spreadsheet document ID (or full URL)',
+                  },
+                  {
+                    key: 'GOOGLE_SERVICE_ACCOUNT_JSON',
+                    val: '{"type":"service_account","project_id":"...","private_key":"-----BEGIN PRIVATE KEY-----...","client_email":"..."}',
+                    desc: 'Easiest option: paste the entire GCP service account .json file contents here instead of setting individual email/key vars',
                   },
                   {
                     key: 'GOOGLE_CLIENT_EMAIL',
                     val: serviceAccountInfo?.clientEmail && serviceAccountInfo.clientEmail !== 'Not configured'
                       ? serviceAccountInfo.clientEmail
                       : '<service-account@your-project.iam.gserviceaccount.com>',
-                    desc: 'GCP Service Account Email with Editor access to the sheet',
-                  },
-                  {
-                    key: 'GOOGLE_PROJECT_ID',
-                    val: serviceAccountInfo?.projectId || '<your-gcp-project-id>',
-                    desc: 'GCP Project ID',
+                    desc: 'Required if not using GOOGLE_SERVICE_ACCOUNT_JSON',
                   },
                   {
                     key: 'GOOGLE_PRIVATE_KEY',
                     val: '-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n',
-                    desc: 'Your service account RSA Private Key from your downloaded GCP service account JSON key file',
+                    desc: 'Required if not using GOOGLE_SERVICE_ACCOUNT_JSON (supports multiline, \\n, or space-separated PEM)',
                   },
                 ].map((item) => (
                   <div key={item.key} className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">

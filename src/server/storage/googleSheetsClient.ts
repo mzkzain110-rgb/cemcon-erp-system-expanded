@@ -7,6 +7,15 @@
 import { google, sheets_v4 } from 'googleapis';
 import { ERP_TAB_SCHEMAS, TabSchema } from '../schema/definitions.js';
 
+export interface EnvPresenceCheck {
+  hasSheetId: boolean;
+  hasClientEmail: boolean;
+  hasPrivateKey: boolean;
+  hasProjectId: boolean;
+  hasServiceAccountJson: boolean;
+  privateKeyFormatValid: boolean;
+}
+
 export interface ServiceAccountStatus {
   isConfigured: boolean;
   projectId: string | null;
@@ -16,6 +25,7 @@ export interface ServiceAccountStatus {
   statusMessage: string;
   spreadsheetTitle?: string;
   availableRemoteTabs?: string[];
+  envCheck?: EnvPresenceCheck;
   lastChecked: string;
 }
 
@@ -45,39 +55,143 @@ export class GoogleSheetsServiceAccountClient {
     return urlMatch ? urlMatch[1] : cleaned;
   }
 
+  private parseServiceAccountJson(raw?: string | null): {
+    clientEmail?: string;
+    privateKey?: string;
+    projectId?: string;
+  } | null {
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('"{')) return null;
+    try {
+      const parsed = JSON.parse(trimmed.startsWith('"{') ? JSON.parse(trimmed) : trimmed);
+      if (parsed && typeof parsed === 'object') {
+        return {
+          clientEmail: typeof parsed.client_email === 'string' ? parsed.client_email : undefined,
+          privateKey: typeof parsed.private_key === 'string' ? parsed.private_key : undefined,
+          projectId: typeof parsed.project_id === 'string' ? parsed.project_id : undefined,
+        };
+      }
+    } catch {
+      // Fall back to raw private key parser
+    }
+    return null;
+  }
+
   private normalizePrivateKey(raw?: string | null): string | null {
     if (!raw) return null;
-    const cleaned = raw.trim().replace(/^["']|["']$/g, '').trim();
+    let cleaned = raw.trim();
+    // Strip trailing comma if copied directly from GCP JSON file
+    if (cleaned.endsWith(',')) cleaned = cleaned.slice(0, -1).trim();
+    // Strip outer single/double quotes
+    cleaned = cleaned.replace(/^["']|["']$/g, '').trim();
     if (!cleaned) return null;
-    return cleaned
+
+    // Decode base64-encoded PEM if user stored base64 string
+    if (!cleaned.includes('BEGIN') && /^[A-Za-z0-9+/=]+$/.test(cleaned) && cleaned.length > 100) {
+      try {
+        const decoded = Buffer.from(cleaned, 'base64').toString('utf8');
+        if (decoded.includes('BEGIN') && decoded.includes('PRIVATE KEY')) {
+          cleaned = decoded;
+        }
+      } catch {
+        // Not base64-encoded PEM
+      }
+    }
+
+    cleaned = cleaned
       .replace(/\\\\n/g, '\n')
       .replace(/\\n/g, '\n')
-      .replace(/\r\n/g, '\n');
+      .replace(/\r\n/g, '\n')
+      .trim();
+
+    // Reconstruct valid 64-char PEM lines if Vercel flattened newlines into spaces
+    const pemMatch = cleaned.match(/-----BEGIN ([A-Z0-9 ]+)-----([\s\S]+?)-----END ([A-Z0-9 ]+)-----/);
+    if (pemMatch) {
+      const header = `-----BEGIN ${pemMatch[1].trim()}-----`;
+      const footer = `-----END ${pemMatch[3].trim()}-----`;
+      const body = pemMatch[2].replace(/\s+/g, '');
+      const lines = body.match(/.{1,64}/g) || [];
+      return `${header}\n${lines.join('\n')}\n${footer}\n`;
+    }
+
+    return cleaned;
+  }
+
+  private computeEnvCheck(
+    projectId: string | null,
+    clientEmail: string | null,
+    privateKey: string | null,
+    sheetId: string | null,
+    hasJson: boolean
+  ): EnvPresenceCheck {
+    return {
+      hasSheetId: !!sheetId,
+      hasClientEmail: !!clientEmail,
+      hasPrivateKey: !!privateKey,
+      hasProjectId: !!projectId,
+      hasServiceAccountJson: hasJson,
+      privateKeyFormatValid: !!(
+        privateKey &&
+        privateKey.includes('-----BEGIN') &&
+        privateKey.includes('PRIVATE KEY-----') &&
+        privateKey.includes('-----END')
+      ),
+    };
   }
 
   public refreshAuth(): boolean {
-    const rawProjectId = process.env.GOOGLE_PROJECT_ID;
-    const rawClientEmail = process.env.GOOGLE_CLIENT_EMAIL;
-    const rawPrivateKey = process.env.GOOGLE_PRIVATE_KEY;
+    const rawJsonEnv = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_CREDENTIALS;
+    const jsonFromEnv = this.parseServiceAccountJson(rawJsonEnv);
+    const jsonInPrivateKey = this.parseServiceAccountJson(process.env.GOOGLE_PRIVATE_KEY);
+    const parsedJson = jsonFromEnv || jsonInPrivateKey;
+
+    const rawProjectId = process.env.GOOGLE_PROJECT_ID || parsedJson?.projectId;
+    const rawClientEmail = process.env.GOOGLE_CLIENT_EMAIL || parsedJson?.clientEmail;
+    const rawPrivateKey = jsonInPrivateKey?.privateKey || process.env.GOOGLE_PRIVATE_KEY || jsonFromEnv?.privateKey;
     const rawSheetId = process.env.GOOGLE_SHEET_ID;
 
     const projectId = rawProjectId ? rawProjectId.trim().replace(/^["']|["']$/g, '').trim() : null;
     const clientEmail = rawClientEmail ? rawClientEmail.trim().replace(/^["']|["']$/g, '').trim() : null;
     const sheetId = this.extractSheetId(rawSheetId);
     const privateKey = this.normalizePrivateKey(rawPrivateKey);
+    const envCheck = this.computeEnvCheck(projectId, clientEmail, privateKey, sheetId, !!parsedJson);
 
     if (!clientEmail || !privateKey || !sheetId) {
       this.sheetsApi = null;
       this.authClient = null;
       this.initialized = false;
+      const missingVars: string[] = [];
+      if (!sheetId) missingVars.push('GOOGLE_SHEET_ID');
+      if (!clientEmail) missingVars.push('GOOGLE_CLIENT_EMAIL');
+      if (!privateKey) missingVars.push('GOOGLE_PRIVATE_KEY');
+
       this.lastStatus = {
         isConfigured: false,
         projectId,
         clientEmail: clientEmail || 'Not configured',
         sheetId: sheetId || 'Not configured',
         liveStatus: 'CREDENTIALS_MISSING',
+        statusMessage: `Missing environment variable(s) on server: ${missingVars.join(', ')}. If you just added them in Vercel, trigger a Redeploy (ensure Production & Preview scopes are selected).`,
+        envCheck,
+        lastChecked: new Date().toISOString(),
+      };
+      return false;
+    }
+
+    if (!envCheck.privateKeyFormatValid) {
+      this.sheetsApi = null;
+      this.authClient = null;
+      this.initialized = false;
+      this.lastStatus = {
+        isConfigured: false,
+        projectId,
+        clientEmail,
+        sheetId,
+        liveStatus: 'ERROR',
         statusMessage:
-          'Missing credentials. Please define GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY, and GOOGLE_SHEET_ID in environment secrets.',
+          'GOOGLE_PRIVATE_KEY format is invalid. Copy the full private_key including -----BEGIN PRIVATE KEY----- and -----END PRIVATE KEY----- (or set GOOGLE_SERVICE_ACCOUNT_JSON to the full downloaded GCP JSON).',
+        envCheck,
         lastChecked: new Date().toISOString(),
       };
       return false;
@@ -100,6 +214,7 @@ export class GoogleSheetsServiceAccountClient {
         sheetId,
         liveStatus: 'CONNECTED',
         statusMessage: 'Service Account configured. Ready to communicate with Google Sheets API.',
+        envCheck,
         lastChecked: new Date().toISOString(),
       };
 
@@ -116,6 +231,7 @@ export class GoogleSheetsServiceAccountClient {
         sheetId,
         liveStatus: 'ERROR',
         statusMessage: `Authentication initialization error: ${err.message}`,
+        envCheck,
         lastChecked: new Date().toISOString(),
       };
       return false;
@@ -123,14 +239,24 @@ export class GoogleSheetsServiceAccountClient {
   }
 
   public getStatus(): ServiceAccountStatus {
-    if (!this.initialized && process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID) {
+    const hasEnvCreds = !!(
+      (process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY) ||
+      process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||
+      process.env.GOOGLE_CREDENTIALS
+    );
+    if (!this.initialized && hasEnvCreds && process.env.GOOGLE_SHEET_ID) {
       this.refreshAuth();
     }
     return { ...this.lastStatus };
   }
 
   public isLiveReady(): boolean {
-    if (!this.initialized && process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID) {
+    const hasEnvCreds = !!(
+      (process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY) ||
+      process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||
+      process.env.GOOGLE_CREDENTIALS
+    );
+    if (!this.initialized && hasEnvCreds && process.env.GOOGLE_SHEET_ID) {
       this.refreshAuth();
     }
     return this.initialized && this.sheetsApi !== null && !!this.extractSheetId(process.env.GOOGLE_SHEET_ID);
@@ -154,15 +280,17 @@ export class GoogleSheetsServiceAccountClient {
       const spreadsheet = response.data;
       const remoteTabs = (spreadsheet.sheets || []).map((s) => s.properties?.title || '').filter(Boolean);
 
+      const prev = this.lastStatus;
       this.lastStatus = {
         isConfigured: true,
-        projectId: process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, '') || null,
-        clientEmail: process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, '') || null,
+        projectId: prev.projectId || process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, '') || null,
+        clientEmail: prev.clientEmail || process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, '') || null,
         sheetId,
         liveStatus: 'CONNECTED',
         statusMessage: `Live connected to Google Sheet "${spreadsheet.properties?.title || sheetId}". Read/Write access verified.`,
         spreadsheetTitle: spreadsheet.properties?.title || 'Compenia ERP Database',
         availableRemoteTabs: remoteTabs,
+        envCheck: prev.envCheck,
         lastChecked: new Date().toISOString(),
       };
 
@@ -172,10 +300,12 @@ export class GoogleSheetsServiceAccountClient {
 
       let statusType: ServiceAccountStatus['liveStatus'] = 'ERROR';
       let message = err.message;
+      const prev = this.lastStatus;
+      const emailDisplay = prev.clientEmail || process.env.GOOGLE_CLIENT_EMAIL || 'your service account';
 
       if (err.code === 403 || err.message?.includes('permission') || err.message?.includes('IAM')) {
         statusType = 'PERMISSION_DENIED';
-        message = `Permission Denied: Please share spreadsheet (${sheetId}) with "${process.env.GOOGLE_CLIENT_EMAIL}" as "Editor".`;
+        message = `Permission Denied: Please share spreadsheet (${sheetId}) with "${emailDisplay}" as "Editor".`;
       } else if (err.code === 404 || err.message?.includes('not found')) {
         statusType = 'SPREADSHEET_NOT_FOUND';
         message = `Spreadsheet Not Found: Please verify that GOOGLE_SHEET_ID "${sheetId}" exists.`;
@@ -183,11 +313,12 @@ export class GoogleSheetsServiceAccountClient {
 
       this.lastStatus = {
         isConfigured: true,
-        projectId: process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, '') || null,
-        clientEmail: process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, '') || null,
+        projectId: prev.projectId || process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, '') || null,
+        clientEmail: prev.clientEmail || process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, '') || null,
         sheetId,
         liveStatus: statusType,
         statusMessage: message,
+        envCheck: prev.envCheck,
         lastChecked: new Date().toISOString(),
       };
 
@@ -564,15 +695,17 @@ export class GoogleSheetsServiceAccountClient {
 
       console.log(`[GoogleSheetsSync] All tabs verified. Total active records in system: ${syncedRows}`);
 
+      const prev = this.lastStatus;
       this.lastStatus = {
         isConfigured: true,
-        projectId: process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, '') || null,
-        clientEmail: process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, '') || null,
+        projectId: prev.projectId || process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, '') || null,
+        clientEmail: prev.clientEmail || process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, '') || null,
         sheetId,
         liveStatus: 'CONNECTED',
         statusMessage: `Connected to Google Sheet "${meta.data.properties?.title || 'Compenia ERP'}". All ${Object.keys(ERP_TAB_SCHEMAS).length} tabs synchronized and hydrated.`,
         spreadsheetTitle: meta.data.properties?.title || 'Compenia ERP Database',
         availableRemoteTabs: Object.keys(ERP_TAB_SCHEMAS),
+        envCheck: prev.envCheck,
         lastChecked: new Date().toISOString(),
       };
 
@@ -586,20 +719,23 @@ export class GoogleSheetsServiceAccountClient {
       console.error('[GoogleSheetsSync] Failed to initialize spreadsheet:', err.message);
       let statusType: ServiceAccountStatus['liveStatus'] = 'ERROR';
       let message = err.message;
+      const prev = this.lastStatus;
+      const emailDisplay = prev.clientEmail || process.env.GOOGLE_CLIENT_EMAIL || 'your service account';
       if (err.code === 403 || err.message?.includes('permission') || err.message?.includes('IAM')) {
         statusType = 'PERMISSION_DENIED';
-        message = `Permission Denied: Please share spreadsheet (${sheetId}) with "${process.env.GOOGLE_CLIENT_EMAIL}" as "Editor".`;
+        message = `Permission Denied: Please share spreadsheet (${sheetId}) with "${emailDisplay}" as "Editor".`;
       } else if (err.code === 404 || err.message?.includes('not found')) {
         statusType = 'SPREADSHEET_NOT_FOUND';
         message = `Spreadsheet Not Found: Please verify that GOOGLE_SHEET_ID "${sheetId}" exists.`;
       }
       this.lastStatus = {
         isConfigured: true,
-        projectId: process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, '') || null,
-        clientEmail: process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, '') || null,
+        projectId: prev.projectId || process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, '') || null,
+        clientEmail: prev.clientEmail || process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, '') || null,
         sheetId,
         liveStatus: statusType,
         statusMessage: message,
+        envCheck: prev.envCheck,
         lastChecked: new Date().toISOString(),
       };
       return {

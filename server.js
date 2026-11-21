@@ -1317,32 +1317,108 @@ var GoogleSheetsServiceAccountClient = class {
     const urlMatch = cleaned.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
     return urlMatch ? urlMatch[1] : cleaned;
   }
+  parseServiceAccountJson(raw) {
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    if (!trimmed.startsWith("{") && !trimmed.startsWith('"{')) return null;
+    try {
+      const parsed = JSON.parse(trimmed.startsWith('"{') ? JSON.parse(trimmed) : trimmed);
+      if (parsed && typeof parsed === "object") {
+        return {
+          clientEmail: typeof parsed.client_email === "string" ? parsed.client_email : void 0,
+          privateKey: typeof parsed.private_key === "string" ? parsed.private_key : void 0,
+          projectId: typeof parsed.project_id === "string" ? parsed.project_id : void 0
+        };
+      }
+    } catch {
+    }
+    return null;
+  }
   normalizePrivateKey(raw) {
     if (!raw) return null;
-    const cleaned = raw.trim().replace(/^["']|["']$/g, "").trim();
+    let cleaned = raw.trim();
+    if (cleaned.endsWith(",")) cleaned = cleaned.slice(0, -1).trim();
+    cleaned = cleaned.replace(/^["']|["']$/g, "").trim();
     if (!cleaned) return null;
-    return cleaned.replace(/\\\\n/g, "\n").replace(/\\n/g, "\n").replace(/\r\n/g, "\n");
+    if (!cleaned.includes("BEGIN") && /^[A-Za-z0-9+/=]+$/.test(cleaned) && cleaned.length > 100) {
+      try {
+        const decoded = Buffer.from(cleaned, "base64").toString("utf8");
+        if (decoded.includes("BEGIN") && decoded.includes("PRIVATE KEY")) {
+          cleaned = decoded;
+        }
+      } catch {
+      }
+    }
+    cleaned = cleaned.replace(/\\\\n/g, "\n").replace(/\\n/g, "\n").replace(/\r\n/g, "\n").trim();
+    const pemMatch = cleaned.match(/-----BEGIN ([A-Z0-9 ]+)-----([\s\S]+?)-----END ([A-Z0-9 ]+)-----/);
+    if (pemMatch) {
+      const header = `-----BEGIN ${pemMatch[1].trim()}-----`;
+      const footer = `-----END ${pemMatch[3].trim()}-----`;
+      const body = pemMatch[2].replace(/\s+/g, "");
+      const lines = body.match(/.{1,64}/g) || [];
+      return `${header}
+${lines.join("\n")}
+${footer}
+`;
+    }
+    return cleaned;
+  }
+  computeEnvCheck(projectId, clientEmail, privateKey, sheetId, hasJson) {
+    return {
+      hasSheetId: !!sheetId,
+      hasClientEmail: !!clientEmail,
+      hasPrivateKey: !!privateKey,
+      hasProjectId: !!projectId,
+      hasServiceAccountJson: hasJson,
+      privateKeyFormatValid: !!(privateKey && privateKey.includes("-----BEGIN") && privateKey.includes("PRIVATE KEY-----") && privateKey.includes("-----END"))
+    };
   }
   refreshAuth() {
-    const rawProjectId = process.env.GOOGLE_PROJECT_ID;
-    const rawClientEmail = process.env.GOOGLE_CLIENT_EMAIL;
-    const rawPrivateKey = process.env.GOOGLE_PRIVATE_KEY;
+    const rawJsonEnv = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_CREDENTIALS;
+    const jsonFromEnv = this.parseServiceAccountJson(rawJsonEnv);
+    const jsonInPrivateKey = this.parseServiceAccountJson(process.env.GOOGLE_PRIVATE_KEY);
+    const parsedJson = jsonFromEnv || jsonInPrivateKey;
+    const rawProjectId = process.env.GOOGLE_PROJECT_ID || parsedJson?.projectId;
+    const rawClientEmail = process.env.GOOGLE_CLIENT_EMAIL || parsedJson?.clientEmail;
+    const rawPrivateKey = jsonInPrivateKey?.privateKey || process.env.GOOGLE_PRIVATE_KEY || jsonFromEnv?.privateKey;
     const rawSheetId = process.env.GOOGLE_SHEET_ID;
     const projectId = rawProjectId ? rawProjectId.trim().replace(/^["']|["']$/g, "").trim() : null;
     const clientEmail = rawClientEmail ? rawClientEmail.trim().replace(/^["']|["']$/g, "").trim() : null;
     const sheetId = this.extractSheetId(rawSheetId);
     const privateKey = this.normalizePrivateKey(rawPrivateKey);
+    const envCheck = this.computeEnvCheck(projectId, clientEmail, privateKey, sheetId, !!parsedJson);
     if (!clientEmail || !privateKey || !sheetId) {
       this.sheetsApi = null;
       this.authClient = null;
       this.initialized = false;
+      const missingVars = [];
+      if (!sheetId) missingVars.push("GOOGLE_SHEET_ID");
+      if (!clientEmail) missingVars.push("GOOGLE_CLIENT_EMAIL");
+      if (!privateKey) missingVars.push("GOOGLE_PRIVATE_KEY");
       this.lastStatus = {
         isConfigured: false,
         projectId,
         clientEmail: clientEmail || "Not configured",
         sheetId: sheetId || "Not configured",
         liveStatus: "CREDENTIALS_MISSING",
-        statusMessage: "Missing credentials. Please define GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY, and GOOGLE_SHEET_ID in environment secrets.",
+        statusMessage: `Missing environment variable(s) on server: ${missingVars.join(", ")}. If you just added them in Vercel, trigger a Redeploy (ensure Production & Preview scopes are selected).`,
+        envCheck,
+        lastChecked: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      return false;
+    }
+    if (!envCheck.privateKeyFormatValid) {
+      this.sheetsApi = null;
+      this.authClient = null;
+      this.initialized = false;
+      this.lastStatus = {
+        isConfigured: false,
+        projectId,
+        clientEmail,
+        sheetId,
+        liveStatus: "ERROR",
+        statusMessage: "GOOGLE_PRIVATE_KEY format is invalid. Copy the full private_key including -----BEGIN PRIVATE KEY----- and -----END PRIVATE KEY----- (or set GOOGLE_SERVICE_ACCOUNT_JSON to the full downloaded GCP JSON).",
+        envCheck,
         lastChecked: (/* @__PURE__ */ new Date()).toISOString()
       };
       return false;
@@ -1362,6 +1438,7 @@ var GoogleSheetsServiceAccountClient = class {
         sheetId,
         liveStatus: "CONNECTED",
         statusMessage: "Service Account configured. Ready to communicate with Google Sheets API.",
+        envCheck,
         lastChecked: (/* @__PURE__ */ new Date()).toISOString()
       };
       return true;
@@ -1377,19 +1454,22 @@ var GoogleSheetsServiceAccountClient = class {
         sheetId,
         liveStatus: "ERROR",
         statusMessage: `Authentication initialization error: ${err.message}`,
+        envCheck,
         lastChecked: (/* @__PURE__ */ new Date()).toISOString()
       };
       return false;
     }
   }
   getStatus() {
-    if (!this.initialized && process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID) {
+    const hasEnvCreds = !!(process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY || process.env.GOOGLE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_CREDENTIALS);
+    if (!this.initialized && hasEnvCreds && process.env.GOOGLE_SHEET_ID) {
       this.refreshAuth();
     }
     return { ...this.lastStatus };
   }
   isLiveReady() {
-    if (!this.initialized && process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID) {
+    const hasEnvCreds = !!(process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY || process.env.GOOGLE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_CREDENTIALS);
+    if (!this.initialized && hasEnvCreds && process.env.GOOGLE_SHEET_ID) {
       this.refreshAuth();
     }
     return this.initialized && this.sheetsApi !== null && !!this.extractSheetId(process.env.GOOGLE_SHEET_ID);
@@ -1408,15 +1488,17 @@ var GoogleSheetsServiceAccountClient = class {
       });
       const spreadsheet = response.data;
       const remoteTabs = (spreadsheet.sheets || []).map((s) => s.properties?.title || "").filter(Boolean);
+      const prev = this.lastStatus;
       this.lastStatus = {
         isConfigured: true,
-        projectId: process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, "") || null,
-        clientEmail: process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, "") || null,
+        projectId: prev.projectId || process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, "") || null,
+        clientEmail: prev.clientEmail || process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, "") || null,
         sheetId,
         liveStatus: "CONNECTED",
         statusMessage: `Live connected to Google Sheet "${spreadsheet.properties?.title || sheetId}". Read/Write access verified.`,
         spreadsheetTitle: spreadsheet.properties?.title || "Compenia ERP Database",
         availableRemoteTabs: remoteTabs,
+        envCheck: prev.envCheck,
         lastChecked: (/* @__PURE__ */ new Date()).toISOString()
       };
       return this.getStatus();
@@ -1424,20 +1506,23 @@ var GoogleSheetsServiceAccountClient = class {
       console.error("[GoogleSheetsClient] Connection test failed:", err.message);
       let statusType = "ERROR";
       let message = err.message;
+      const prev = this.lastStatus;
+      const emailDisplay = prev.clientEmail || process.env.GOOGLE_CLIENT_EMAIL || "your service account";
       if (err.code === 403 || err.message?.includes("permission") || err.message?.includes("IAM")) {
         statusType = "PERMISSION_DENIED";
-        message = `Permission Denied: Please share spreadsheet (${sheetId}) with "${process.env.GOOGLE_CLIENT_EMAIL}" as "Editor".`;
+        message = `Permission Denied: Please share spreadsheet (${sheetId}) with "${emailDisplay}" as "Editor".`;
       } else if (err.code === 404 || err.message?.includes("not found")) {
         statusType = "SPREADSHEET_NOT_FOUND";
         message = `Spreadsheet Not Found: Please verify that GOOGLE_SHEET_ID "${sheetId}" exists.`;
       }
       this.lastStatus = {
         isConfigured: true,
-        projectId: process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, "") || null,
-        clientEmail: process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, "") || null,
+        projectId: prev.projectId || process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, "") || null,
+        clientEmail: prev.clientEmail || process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, "") || null,
         sheetId,
         liveStatus: statusType,
         statusMessage: message,
+        envCheck: prev.envCheck,
         lastChecked: (/* @__PURE__ */ new Date()).toISOString()
       };
       return this.getStatus();
@@ -1765,15 +1850,17 @@ var GoogleSheetsServiceAccountClient = class {
         }
       }
       console.log(`[GoogleSheetsSync] All tabs verified. Total active records in system: ${syncedRows}`);
+      const prev = this.lastStatus;
       this.lastStatus = {
         isConfigured: true,
-        projectId: process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, "") || null,
-        clientEmail: process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, "") || null,
+        projectId: prev.projectId || process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, "") || null,
+        clientEmail: prev.clientEmail || process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, "") || null,
         sheetId,
         liveStatus: "CONNECTED",
         statusMessage: `Connected to Google Sheet "${meta.data.properties?.title || "Compenia ERP"}". All ${Object.keys(ERP_TAB_SCHEMAS).length} tabs synchronized and hydrated.`,
         spreadsheetTitle: meta.data.properties?.title || "Compenia ERP Database",
         availableRemoteTabs: Object.keys(ERP_TAB_SCHEMAS),
+        envCheck: prev.envCheck,
         lastChecked: (/* @__PURE__ */ new Date()).toISOString()
       };
       return {
@@ -1786,20 +1873,23 @@ var GoogleSheetsServiceAccountClient = class {
       console.error("[GoogleSheetsSync] Failed to initialize spreadsheet:", err.message);
       let statusType = "ERROR";
       let message = err.message;
+      const prev = this.lastStatus;
+      const emailDisplay = prev.clientEmail || process.env.GOOGLE_CLIENT_EMAIL || "your service account";
       if (err.code === 403 || err.message?.includes("permission") || err.message?.includes("IAM")) {
         statusType = "PERMISSION_DENIED";
-        message = `Permission Denied: Please share spreadsheet (${sheetId}) with "${process.env.GOOGLE_CLIENT_EMAIL}" as "Editor".`;
+        message = `Permission Denied: Please share spreadsheet (${sheetId}) with "${emailDisplay}" as "Editor".`;
       } else if (err.code === 404 || err.message?.includes("not found")) {
         statusType = "SPREADSHEET_NOT_FOUND";
         message = `Spreadsheet Not Found: Please verify that GOOGLE_SHEET_ID "${sheetId}" exists.`;
       }
       this.lastStatus = {
         isConfigured: true,
-        projectId: process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, "") || null,
-        clientEmail: process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, "") || null,
+        projectId: prev.projectId || process.env.GOOGLE_PROJECT_ID?.trim().replace(/^["']|["']$/g, "") || null,
+        clientEmail: prev.clientEmail || process.env.GOOGLE_CLIENT_EMAIL?.trim().replace(/^["']|["']$/g, "") || null,
         sheetId,
         liveStatus: statusType,
         statusMessage: message,
+        envCheck: prev.envCheck,
         lastChecked: (/* @__PURE__ */ new Date()).toISOString()
       };
       return {
